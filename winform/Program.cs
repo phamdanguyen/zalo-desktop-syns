@@ -18,14 +18,17 @@ namespace ZaloSync
     static class Program
     {
         [STAThread]
-        static void Main()
+        static int Main(string[] args)
         {
+            // Task Scheduler gọi "ZaloSync.exe --scheduled": đồng bộ ẩn rồi thoát, không mở giao diện.
+            if (args.Contains("--scheduled")) return Cli.RunScheduled();
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             try { Cli.EnsureRuntime(); }
-            catch (Exception ex) { MessageBox.Show("Không chuẩn bị được runtime: " + ex.Message, "Lỗi"); return; }
+            catch (Exception ex) { MessageBox.Show("Không chuẩn bị được runtime: " + ex.Message, "Lỗi"); return 1; }
             try { Application.Run(new MainForm()); }
-            catch (Exception ex) { MessageBox.Show(ex.ToString(), "Lỗi khởi động"); }
+            catch (Exception ex) { MessageBox.Show(ex.ToString(), "Lỗi khởi động"); return 1; }
+            return 0;
         }
     }
 
@@ -103,7 +106,36 @@ namespace ZaloSync
             };
             psi.WorkingDirectory = Path.GetDirectoryName(CliJs());
             if (!string.IsNullOrEmpty(RuntimeDir)) psi.EnvironmentVariables["ZALOSYNC_ENGINE_DIR"] = Path.Combine(RuntimeDir, "engine");
+            psi.EnvironmentVariables["ZALOSYNC_EXE"] = Application.ExecutablePath; // lịch chạy gọi lại chính exe này (--scheduled)
             return psi;
+        }
+
+        // Lượt chạy theo lịch. Exe là ứng dụng GUI + node chạy CreateNoWindow → không có cửa sổ cmd nào để lỡ tay đóng
+        // giữa chừng. Node tự quyết có đến hạn không (chạy bù đúng 1 lần), tự ghi log + state; exe chỉ trả mã thoát.
+        public static int RunScheduled()
+        {
+            try
+            {
+                EnsureRuntime(); // runtime bị xoá (bản exe khác đã chạy) → giải nén lại, lịch không hỏng
+                using (var p = StartStream("run --scheduled"))
+                {
+                    p.BeginOutputReadLine(); p.BeginErrorReadLine(); // xả pipe để node không bị nghẽn (log do runner ghi)
+                    p.WaitForExit();
+                    return p.ExitCode;
+                }
+            }
+            catch (Exception ex)
+            {
+                // Không MessageBox (lúc 4 giờ sáng không ai bấm) → ghi lỗi vào log của app.
+                try
+                {
+                    string logDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ZaloSync", "logs");
+                    Directory.CreateDirectory(logDir);
+                    File.AppendAllText(Path.Combine(logDir, "daily_sync.log"), "\r\n[TỰ ĐỘNG] " + DateTime.Now.ToString("s") + " LỖI khởi chạy: " + ex.Message + "\r\n", new UTF8Encoding(false));
+                }
+                catch { }
+                return 1;
+            }
         }
 
         // Chạy 1 lệnh, trả về stdout (chặn — gọi trong Task.Run).
@@ -292,23 +324,31 @@ namespace ZaloSync
                 hNode.ForeColor = sqliteOk ? Color.FromArgb(46, 160, 67) : Color.FromArgb(248, 81, 73);
 
                 var cfg = await Task.Run(() => Cli.RunJson("get-config"));
-                if (cfg.ContainsKey("exists") && Convert.ToBoolean(cfg["exists"])) { await ShowDashboard(); await RefreshSchedule(); }
+                if (cfg.ContainsKey("exists") && Convert.ToBoolean(cfg["exists"]))
+                {
+                    await ShowDashboard();
+                    // Lịch đang bật nhưng lệch cấu hình/exe hiện tại (exe mới hoặc bị di chuyển, tác vụ bản cũ còn chạy
+                    // run_sync.bat có cửa sổ cmd) → đăng ký lại.
+                    string w = await SyncSchedule("schedule-refresh");
+                    if (w != null) AppendLog("\r\n[CẢNH BÁO] Không cập nhật được lịch chạy tự động: " + w);
+                }
                 else ShowStep1(env);
             }
             catch (Exception ex) { var err = P(ex.Message); SetPage(err, H2("Lỗi"), err); }
         }
 
-        // Bản exe mới giải nén runtime vào thư mục mới (xoá runtime cũ) → ghi lại run_sync.bat của lịch chạy,
-        // kẻo tác vụ hằng ngày trỏ vào node.exe không còn tồn tại.
-        async Task RefreshSchedule()
+        // Chạy 1 lệnh lịch (schedule-set/-del/-refresh) rồi cập nhật thẻ trạng thái. Trả lỗi (null = ổn) để nơi gọi tự báo.
+        async Task<string> SyncSchedule(string cmd)
         {
+            string err = null;
             try
             {
-                var r = await Task.Run(() => Cli.RunJson("schedule-refresh"));
-                if (!(r.ContainsKey("ok") && Convert.ToBoolean(r["ok"])))
-                    AppendLog("\r\n[CẢNH BÁO] Không cập nhật được lịch chạy tự động: " + (r.ContainsKey("error") ? r["error"] : "không rõ"));
+                var r = await Task.Run(() => Cli.RunJson(cmd));
+                if (!(r.ContainsKey("ok") && Convert.ToBoolean(r["ok"]))) err = r.ContainsKey("error") ? Convert.ToString(r["error"]) : "không rõ";
             }
-            catch (Exception ex) { AppendLog("\r\n[CẢNH BÁO] Không cập nhật được lịch chạy tự động: " + ex.Message); }
+            catch (Exception ex) { err = ex.Message; }
+            if (refreshDashboard != null) await refreshDashboard();
+            return err;
         }
 
         // ---- BƯỚC 1: phát hiện Zalo ----
@@ -452,11 +492,12 @@ namespace ZaloSync
             {
                 finish.Enabled = false; status.Text = "⏳ Đang lưu cấu hình…"; status.ForeColor = MUTED;
                 var tg = picked.Select(g => new Dictionary<string, object> { { "id", g["id"] }, { "code", g["id"] }, { "name", g["name"] } }).ToList();
+                string time = timePick.Value.ToString("HH:mm");
                 var payload = new Dictionary<string, object>
                 {
                     { "uid", uid }, { "coreDir", coreDir }, { "key", key },
                     { "projectLabel", projBox.Text.Trim() }, { "targetGroups", tg },
-                    { "downloadDir", dirBox.Text.Trim() }, { "scheduleTime", timePick.Value.ToString("HH:mm") },
+                    { "downloadDir", dirBox.Text.Trim() }, { "scheduleTime", time },
                 };
                 string tmp = Path.Combine(Path.GetTempPath(), "zalosync_cfg_" + Guid.NewGuid().ToString("N") + ".json");
                 File.WriteAllText(tmp, Cli.ToJson(payload), new UTF8Encoding(false)); // KHÔNG BOM (Node JSON.parse vỡ với BOM)
@@ -464,7 +505,15 @@ namespace ZaloSync
                 {
                     var sr = await Task.Run(() => Cli.RunJson("save-config --payload " + Cli.Esc(tmp)));
                     try { File.Delete(tmp); } catch { }
-                    if (sr != null && sr.ContainsKey("ok") && Convert.ToBoolean(sr["ok"])) { await ShowDashboard(); }
+                    if (sr != null && sr.ContainsKey("ok") && Convert.ToBoolean(sr["ok"]))
+                    {
+                        await ShowDashboard();
+                        // Thiết lập lần đầu → bật lịch luôn theo giờ vừa chọn. "Thiết lập lại" → lịch đang bật thì đăng ký lại
+                        // theo giờ mới (trước đây chỉ ghi giờ vào cấu hình, tác vụ vẫn chạy giờ cũ); đang tắt thì giữ tắt.
+                        string w = await SyncSchedule(savedCfg == null ? "schedule-set --time " + Cli.Esc(time) : "schedule-refresh");
+                        if (w != null) MessageBox.Show(this, "Đã lưu cấu hình, nhưng lịch chạy tự động CHƯA cập nhật được:\r\n" + w,
+                            "Cảnh báo", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
                     else { status.Text = "✗ Lưu cấu hình thất bại: " + (sr != null && sr.ContainsKey("error") ? sr["error"] : "không rõ"); status.ForeColor = Color.FromArgb(248, 81, 73); finish.Enabled = true; }
                 }
                 catch (Exception ex) { status.Text = "✗ " + ex.Message; status.ForeColor = Color.FromArgb(248, 81, 73); finish.Enabled = true; }
@@ -473,6 +522,7 @@ namespace ZaloSync
 
         // ---- BẢNG ĐIỀU KHIỂN ----
         TextBox logBox;
+        Func<Task> refreshDashboard; // cập nhật thẻ trạng thái của bảng điều khiển (null = chưa hiện lần nào)
         async Task ShowDashboard()
         {
             var title = H2("Bảng điều khiển");
@@ -502,6 +552,7 @@ namespace ZaloSync
                 toggle.Tag = on;
                 _dataDir = Convert.ToString(st["dataDir"]);
             };
+            refreshDashboard = refresh;
             await refresh();
             var loadLog = await Task.Run(() => Cli.RunJson("log --tail 200"));
             if (loadLog.ContainsKey("lines")) logBox.Text = string.Join("\r\n", ((object[])loadLog["lines"]).Select(x => Convert.ToString(x)));
@@ -537,10 +588,18 @@ namespace ZaloSync
             {
                 toggle.Enabled = false;
                 bool on = toggle.Tag != null && (bool)toggle.Tag;
-                var st = await Task.Run(() => Cli.RunJson("status"));
-                string tm = Convert.ToString(st["scheduleTime"]) ?? "04:15";
-                await Task.Run(() => Cli.RunJson(on ? "schedule-del" : "schedule-set --time " + Cli.Esc(tm)));
-                toggle.Enabled = true; await refresh();
+                string w;
+                try
+                {
+                    var st = await Task.Run(() => Cli.RunJson("status"));
+                    string tm = Convert.ToString(st["scheduleTime"]) ?? "04:15";
+                    w = await SyncSchedule(on ? "schedule-del" : "schedule-set --time " + Cli.Esc(tm));
+                }
+                catch (Exception ex) { w = ex.Message; }
+                // báo lỗi rõ ràng — không để nút im lặng trở về trạng thái cũ
+                if (w != null) MessageBox.Show(this, (on ? "Không tắt được" : "Không bật được") + " lịch chạy tự động:\r\n" + w,
+                    "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                toggle.Enabled = true;
             };
         }
 

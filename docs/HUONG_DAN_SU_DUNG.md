@@ -65,7 +65,7 @@ Cơ sở dữ liệu Zalo được mã hóa bảo vệ trên máy. Zalo Sync đ�
 * **Tên dự án:** Mặc định là `Zalo Sync — dữ liệu nhóm công trường` (có thể giữ nguyên).
 * **Thư mục lưu dữ liệu:** Mặc định lưu tại thư mục `Documents\ZaloSync\data` của máy. Bạn có thể bấm nút **"Chọn..."** nếu muốn đổi sang ổ D: hoặc E:.
 * **Giờ chạy tự động hằng ngày:** Khuyến nghị đặt lúc **`04:15 AM`** (sáng sớm). Đây là thời điểm máy ít hoạt động, phần mềm sẽ tự động thu thập trọn vẹn dữ liệu của ngày hôm trước mà không làm ảnh hưởng đến công việc của bạn.
-* Bấm nút cam **✔ Hoàn tất & lưu**.
+* Bấm nút cam **✔ Hoàn tất & lưu**. Lần thiết lập đầu tiên, lịch chạy tự động được **bật luôn** theo giờ vừa chọn. Khi dùng **⚙ Thiết lập lại** để đổi giờ, lịch đang bật sẽ được cập nhật sang giờ mới.
 
 ![Bước 4 — Nơi lưu & lịch chạy](step4-860x640.png)
 
@@ -82,7 +82,7 @@ Sau khi hoàn tất cấu hình, bạn sẽ vào màn hình **Bảng điều khi
 | Nút bấm | Ý nghĩa & Hướng dẫn sử dụng |
 | :--- | :--- |
 | **▶ Chạy ngay** (Nút màu cam) | Nhấp để bắt đầu đồng bộ dữ liệu ngay lập tức. Cửa sổ đen phía dưới sẽ hiển thị tiến trình quét tin nhắn, tải ảnh, tải file văn bản/bản vẽ. |
-| **⏰ Bật tự động** | **Rất khuyến nghị:** Bấm nút này 1 lần. Ứng dụng sẽ tự động đăng ký với Windows để chạy ngầm đúng vào giờ bạn đã chọn ở Bước 4 (ví dụ 04:15 sáng). Khi đã bật, trạng thái sẽ báo `BẬT`. |
+| **⏰ Bật tự động** / **⏸ Tắt tự động** | Lịch chạy đã được bật sẵn sau lần thiết lập đầu tiên. Nút này để tắt hoặc bật lại. Khi bật, ứng dụng đăng ký với Windows để chạy ngầm đúng giờ bạn chọn ở Bước 4 (ví dụ 04:15 sáng), không hiện cửa sổ nào, và trạng thái báo `BẬT`. Nếu Windows từ chối đăng ký, ứng dụng hiện thông báo lỗi. |
 | **📁 Thư mục dữ liệu** | Bấm để mở ngay thư mục chứa toàn bộ tin nhắn, hình ảnh, biên bản, báo cáo công trường đã tải về máy tính. |
 | **📋 Xuất log** | Khi gặp lỗi hoặc cần hỗ trợ, bấm nút này. Phần mềm sẽ tự động xuất file nhật ký (đã ẩn khóa an toàn) và tự mở thư mục báo cáo. Bạn chỉ cần gửi file này cho bộ phận kỹ thuật / AI hỗ trợ. |
 | **Chạy thử** (Dry Run) | Chạy thử nghiệm quét dữ liệu mà không tải file nặng về ổ cứng (dùng để kiểm tra kết nối). |
@@ -105,8 +105,9 @@ Sau khi hoàn tất cấu hình, bạn sẽ vào màn hình **Bảng điều khi
 1. **Phần mềm có làm lộ tin nhắn hay mật khẩu Zalo không?**
    * *Hoàn toàn không.* Phần mềm chạy hoàn toàn cục bộ trên máy của bạn (offline/local), chỉ đọc dữ liệu của tài khoản đang đăng nhập trên máy đó và lưu thẳng vào thư mục trên ổ cứng của bạn. Khóa giải mã cũng được che kín khi xuất log.
 2. **Tôi có cần bật phần mềm này liên tục không?**
-   * Chỉ cần bấm nút **"Bật tự động"** một lần duy nhất. Windows sẽ tự động kích hoạt tác vụ chạy ngầm hằng ngày mà không cần bạn phải mở sẵn cửa sổ ứng dụng.
-3. **Nếu vào giờ chạy tự động máy tính đang tắt thì sao?**
-   * Tác vụ đã được cấu hình chế độ bù giờ: khi bạn mở máy tính lên làm việc, hệ thống sẽ tự động phát hiện và thực hiện lượt chạy bù cho bạn.
+   * Không. Sau khi lịch được bật, Windows tự kích hoạt lượt đồng bộ ngầm hằng ngày, bạn không cần mở sẵn cửa sổ ứng dụng. Chỉ cần **đừng xoá hay di chuyển file `ZaloSync.exe`**, vì lịch gọi đúng file đó. Nếu đã lỡ di chuyển, hãy mở ứng dụng từ chỗ mới một lần để lịch tự cập nhật.
+3. **Nếu vào giờ chạy tự động máy tính đang tắt (hoặc đang ngủ) thì sao?**
+   * Ứng dụng tự chạy bù: khoảng **10 phút sau khi bạn đăng nhập Windows** (để Zalo PC kịp mở và nhận tin mới), hoặc ngay khi máy thức dậy. Dù máy tắt nhiều ngày, chỉ cần **một lượt bù** là lấy đủ dữ liệu của tất cả các ngày bị lỡ. Nếu hôm đó đã đồng bộ thành công rồi thì lượt bù tự bỏ qua, không chạy trùng.
+   * Lịch chỉ chạy khi bạn đã đăng nhập Windows. Lúc máy đang ở màn hình đăng nhập thì Zalo PC chưa chạy nên cũng chưa có tin mới để lấy.
 4. **Khi gặp trục trặc thì liên hệ hỗ trợ như thế nào?**
    * Bạn chỉ cần bấm nút **"Xuất log"** trên Bảng điều khiển. Thư mục `baocao` sẽ tự động mở ra với file nhật ký dạng `ZaloSync_log_...txt`. Hãy gửi file này cho nhân sự phụ trách công nghệ hoặc chuyển cho trợ lý AI để được hướng dẫn xử lý ngay lập tức.

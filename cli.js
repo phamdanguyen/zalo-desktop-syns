@@ -12,7 +12,9 @@
  *   node cli.js save-config --payload <file.json>
  *   node cli.js status
  *   node cli.js schedule-get | schedule-set --time HH:MM | schedule-del | schedule-refresh
+ *       (set/refresh cần env ZALOSYNC_EXE = đường dẫn ZaloSync.exe, GUI tự truyền; trả {ok:true,...}, lỗi → {ok:false,error} + exit 1)
  *   node cli.js run [--all] [--dry-run]
+ *   node cli.js run --scheduled             (Task Scheduler qua `ZaloSync.exe --scheduled`: chỉ chạy nếu đã bỏ lỡ mốc lịch)
  *   node cli.js log --tail 300
  *   node cli.js export-log [--out <file>]
  *   node cli.js open-folder --path <p>
@@ -123,6 +125,11 @@ async function main() {
       return out({ ok: true });
     }
     case 'run': {
+      if (a.scheduled) {
+        const r = await runner.runScheduled({}, (line) => process.stdout.write(line + '\n'));
+        process.exit(r.code || 0);
+        return;
+      }
       // Stream từng dòng ra stdout để WinForm đọc trực tiếp.
       const res = await runner.runSync({ all: !!a.all, dryRun: !!a['dry-run'] }, (line) => {
         process.stdout.write(line + '\n');

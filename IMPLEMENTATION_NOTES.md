@@ -331,3 +331,36 @@ tên). `node --test test/*.test.js` → 24/24 PASS. Engine không đụng nên b
 - Phát hiện (có từ trước, chưa sửa): bảng điều khiển hiện "04:15 (kế tiếp 28/10/2026 11:15)" — giờ kế tiếp lệch +7 h (lỗi múi giờ hiển thị).
 - `app/` đã thành git repo (phiên app-db, commit `ccb6d45`, đã push): thay đổi sau commit đó chưa commit (CLAUDE.md, build.ps1, ghi chú này);
   engine `../scripts` nằm NGOÀI repo.
+
+## 2026-10-27 — Lịch tự động: chạy bù sau khởi động lại / lỡ lịch (yêu cầu: "vấn đề 3 … chạy tự động hoàn toàn khi khởi động lại máy … lịch muộn thì tải bù")
+Nhánh `fix/lich-tu-dong-chay-bu` (commit `342c22d`, `d2e1953` + ghi chú này). Sao lưu trạng thái thật trước khi sửa: `%LOCALAPPDATA%\Temp\zalosync_backup_20261027\` (config, state, run_sync.bat, XML tác vụ cũ).
+
+**Sự thật đã kiểm (không đoán):**
+- Engine luôn chạy `--all` (floorTs = 0) → MỘT lượt thành công sau nhiều ngày tắt máy là đủ dữ liệu mọi ngày bị lỡ. Thiếu là *đảm bảo lượt bù chắc chắn chạy, đúng 1 lần*.
+- Trigger đăng nhập **của chính user** (`-AtLogOn -User $me`, Delay PT10M) đăng ký được từ shell **không elevated** (Medium IL). Ghi chú cũ "AtLogOn cần admin (0x80070005)" là trigger đăng nhập của MỌI user.
+- Trước đây lượt theo lịch chạy `run_sync.bat` → engine trực tiếp: không ghi `state.json` ("Lần chạy cuối" không phản ánh lượt tự động), hiện cửa sổ cmd; khóa "1 lượt" của runner chỉ trong 1 tiến trình.
+
+**Quyết định (ngoài spec / phải chọn):**
+- **Không chạy trước khi đăng nhập Windows**: engine đọc DB cục bộ của Zalo PC — DB chỉ nhận tin mới khi đã đăng nhập + Zalo đang mở; chạy ở màn hình khóa không thêm dữ liệu, lại phải lưu mật khẩu Windows/S4U.
+- Chạy bù: trigger hằng ngày + trigger đăng nhập (trễ 10' cho Zalo PC kịp đồng bộ) + StartWhenAvailable (máy ngủ rồi thức) + IgnoreNew; `runScheduled` chỉ chạy khi `isRunDue` (chưa có lượt thành công nào BẮT ĐẦU sau mốc lịch gần nhất; đệm 2' trước mốc) → nhiều trigger kích liên tiếp vẫn chỉ 1 lượt. `lastSuccessAt` = giờ bắt đầu lượt exit 0 không dry-run (chạy tay "▶ Chạy ngay" cũng tính).
+- Bỏ `run_sync.bat`: action = `ZaloSync.exe --scheduled` (exe GUI chạy ẩn, node CreateNoWindow; tự giải nén lại runtime nếu bị xoá). Đánh đổi: tác vụ phụ thuộc vị trí exe → `schedule-refresh` khi mở app trỏ lại; hướng dẫn ghi "đừng xoá/di chuyển exe". Đường dẫn exe truyền qua env `ZALOSYNC_EXE` (GUI đặt cho mọi lệnh CLI); thiếu → lỗi rõ ràng, không đoán (tránh lặp sự cố dev-CLI ghi đè lịch thật).
+- Thêm khoá liên tiến trình `run.lock` (pid + giờ; pid chết hoặc > 6 h → bỏ lại vì PID Windows bị tái dùng): trigger đăng nhập làm tăng khả năng trùng với "Chạy ngay" → 2 engine cùng ghi cursor/manifest. Lượt tự động gặp khoá → ghi "bỏ qua" (exit 0).
+- `refresh` chỉ đăng ký lại khi LỆCH (giờ/exe/tham số/trigger đăng nhập) — không ghi đè tác vụ mỗi lần mở app (tránh đụng lượt đang chạy).
+- Master chọn: **thiết lập lần đầu tự bật lịch** ("Hoàn tất" → `schedule-set`); "Thiết lập lại" → `schedule-refresh` (lịch tắt thì giữ tắt).
+- Sửa luôn lỗi hiển thị "kế tiếp" lệch +7 h (ghi ở vòng 3): `query` trả nextRun/lastRun ISO có offset.
+- Lỗi lượt tự động TRƯỚC khi chạy engine (mất config…) giờ ghi `[TỰ ĐỘNG] … LỖI —` vào log (exe bỏ stdout). Lỗi của chính exe (giải nén runtime) cũng ghi vào log, không MessageBox.
+- `CLAUDE.md`: lệnh test engine `node --test scripts/` báo MODULE_NOT_FOUND trên Node hiện tại → sửa thành `scripts/*.test.js`.
+
+**Kiểm chứng:**
+- App **68/68** (0 skip; gồm đăng ký thật vào Task Scheduler bằng tên tạm `ZaloSync_Test_*` + đối chiếu độc lập principal/settings/trigger; engine giả cho runner/CLI), engine **78/78**.
+- ⚠ Sự cố trong lúc làm: một test đầu tiên đặt `ZALOSYNC_ENGINE_DIR` sai để giả "thiếu engine" → `engine_path` lùi về `../scripts` → chạy engine THẬT với config giả (thiếu đường dẫn → engine mặc định `D:/Workspace/568/zalo_inbox`, `deliverables/schedule`). Đã kiểm: 2 thư mục đó không có tệp nào đổi trong 40'. Test đã bỏ nhánh đó (có chú thích cảnh báo).
+- `test_ui.ps1` (mặc định) PASS; `test_ui.ps1 -Schedule` PASS trên exe thật: A định nghĩa tác vụ + nhãn "kế tiếp 28/10/2026 04:15" (hết +7h); B tắt/bật; C đổi giờ qua wizard 04:15→05:15 → config + tác vụ + nhãn theo giờ mới; D PATH không có PowerShell → hộp thoại "Không bật được lịch chạy tự động: … ENOENT", tác vụ không đổi; E lượt ẩn nhánh bỏ qua: 0 cửa sổ, exit 0. Config/state khôi phục trùng hash bản sao lưu.
+- Cài `dist\ZaloSync.exe` vào `Programs\ZaloSync\` → mở 1 lần → tác vụ thật tự chuyển sang `Programs\ZaloSync\ZaloSync.exe --scheduled` (1,5 s).
+- **Chạy THẬT qua Task Scheduler** (Master cho phép): "đến hạn" → engine `--all` → exit 0 sau 6 s, LastTaskResult 0, **0 cửa sổ hiển thị mới**, `run.lock` có trong lúc chạy và được nhả, `lastSuccessAt` ghi đúng giờ bắt đầu; gọi lại → "bỏ qua". Khoá với tiến trình thật: lock do GUI (pid sống) giữ + trạng thái đến hạn → tác vụ ghi "bỏ qua — Đang có một lượt…", engine không chạy; đã khôi phục state.
+
+**Chưa kiểm chứng được (cần Master):** trigger đăng nhập sau khởi động lại thật (không thể log off trong phiên). Lịch sử Task Scheduler đang tắt (bật cần admin). Bằng chứng nằm ở `logs\daily_sync.log`: ~10' sau khi đăng nhập phải có dòng `[TỰ ĐỘNG] … bỏ qua` (nếu hôm đó đã đồng bộ) hoặc `… đến hạn …` + banner `KHỞI CHẠY`.
+
+**Giới hạn / còn lại (không sửa — ngoài phạm vi):**
+- 404 khi tải tệp đính kèm (lượt thật hôm nay vẫn còn) — vấn đề engine/nguồn tải, không phải lịch.
+- Máy tắt nhiều ngày → 1 lượt bù lấy đủ dữ liệu nhưng chỉ 1 `DAILY_REPORT_<ngày chạy>.md` (không sinh báo cáo cho từng ngày lỡ) — hành vi engine.
+- Tác vụ bị người dùng Disable trong Task Scheduler vẫn hiện "BẬT" (chỉ kiểm tồn tại). Bộ cài `.bat` không tắt `ZaloSync.exe` đang chạy (lượt tự động đang chạy → copy đè thất bại) — có từ trước.

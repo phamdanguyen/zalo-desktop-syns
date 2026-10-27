@@ -12,9 +12,23 @@
 #   - tên app mới "Zalo Sync": tiêu đề cửa sổ + mọi nhãn/nút không còn tên cũ "568"; bản cài tên cũ đã được chuyển + dọn.
 # Ảnh chụp từng trường hợp lưu ở $ShotDir. Thoát mã ≠ 0 nếu có lỗi.
 # Chạy: powershell -NoProfile -ExecutionPolicy Bypass -File winform\test_ui.ps1
+#
+# -Schedule: thêm kiểm thử đầu-cuối LỊCH TỰ ĐỘNG trên exe thật. CẢNH BÁO: chế độ này SỬA tác vụ ZaloSync_Daily + config.json
+# thật của máy (có sao lưu → khôi phục nguyên byte trong finally, rồi mở lại app để tác vụ khớp lại giờ gốc).
+#   A. tác vụ thật khớp định nghĩa (exe --scheduled, trigger Daily đúng giờ + Logon Delay PT10M, StartWhenAvailable,
+#      IgnoreNew, không còn run_sync.bat); nhãn bảng điều khiển "BẬT · giờ (kế tiếp … giờ)" khớp giờ cấu hình.
+#   B. nút ⏸ Tắt tự động / ⏰ Bật tự động: xoá + tạo lại tác vụ, nhãn đổi, không hiện hộp thoại lỗi.
+#   C. Thiết lập lại → đổi giờ (DateTimePicker: bấm vào ô giờ rồi gửi VK_UP) → Hoàn tất: config + tác vụ + nhãn sang giờ mới.
+#   D. đường lỗi phải ồn ào: chạy app với PATH không có WindowsPowerShell → bấm Bật tự động ra hộp thoại "Không bật được…",
+#      tác vụ thật không đổi.
+#   E. Start-ScheduledTask khi đã đồng bộ sau mốc lịch (lastSuccessAt = bây giờ) → chạy ẨN (không cửa sổ mới nào của
+#      ZaloSync/node/cmd/conhost/terminal/powershell), exit 0, log có "[TỰ ĐỘNG] … bỏ qua", lastSuccessAt không đổi.
+#      Không bao giờ chạy đồng bộ thật: nếu log báo "đến hạn" → dừng tác vụ + giết node engine ngay và FAIL.
+# Chạy: powershell -NoProfile -ExecutionPolicy Bypass -File winform\test_ui.ps1 -Schedule
 param(
   [string]$Exe = (Join-Path $PSScriptRoot 'build\ZaloSync.exe'),
-  [string]$ShotDir = (Join-Path $env:TEMP 'zalosync_layout')
+  [string]$ShotDir = (Join-Path $env:TEMP 'zalosync_layout'),
+  [switch]$Schedule
 )
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing, WindowsBase
@@ -37,6 +51,34 @@ public static class W {
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
   [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, out RECT r);
   [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref POINT p);
+  // --- dùng cho -Schedule: cửa sổ cấp cao đang hiện + mọi control con (kể cả hộp thoại MessageBox, lớp Static/Button) ---
+  public class Top { public IntPtr H; public uint Pid; public string Cls, Title; }
+  [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc f, IntPtr l);
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+  public static List<Top> Tops() {
+    var list = new List<Top>();
+    EnumWindows((h, l) => {
+      if (!IsWindowVisible(h)) return true;
+      uint pid; GetWindowThreadProcessId(h, out pid);
+      var c = new StringBuilder(256); GetClassName(h, c, 256);
+      var t = new StringBuilder(512); GetWindowText(h, t, 512);
+      list.Add(new Top { H = h, Pid = pid, Cls = c.ToString(), Title = t.ToString() });
+      return true;
+    }, IntPtr.Zero);
+    return list;
+  }
+  public static List<Ctl> Kids(IntPtr parent) {
+    var list = new List<Ctl>();
+    EnumChildWindows(parent, (h, l) => {
+      var cls = new StringBuilder(256); GetClassName(h, cls, 256);
+      var t = new StringBuilder(1024); SendMessage(h, 0x000D, (IntPtr)1024, t);
+      list.Add(new Ctl { H = h, Kind = cls.ToString(), Text = t.ToString(), Enabled = IsWindowEnabled(h) });
+      return true;
+    }, IntPtr.Zero);
+    return list;
+  }
   static readonly string[] Leaf = { "BUTTON", "STATIC", "EDIT", "LISTBOX", "SysDateTimePick32" };
   // Control lá đang hiển thị; Kind = một trong Leaf (theo tên lớp WindowsForms10.<KIND>.app…)
   public static List<Ctl> Leaves(IntPtr parent) {
@@ -61,6 +103,18 @@ $failures = New-Object System.Collections.Generic.List[string]
 
 New-Item -ItemType Directory -Force $ShotDir | Out-Null
 Get-Process ZaloSync -ErrorAction SilentlyContinue | Stop-Process -Force
+$AppDir = Join-Path $env:LOCALAPPDATA 'ZaloSync'
+if ($Schedule) {
+  # sao lưu TRƯỚC khi mở exe (app tự đối soát tác vụ khi khởi động); khôi phục trong finally
+  $Backup = Join-Path $env:TEMP ('zalosync_sched_backup_' + (Get-Date -Format 'yyyyMMdd_HHmmss'))
+  New-Item -ItemType Directory -Force $Backup | Out-Null
+  Copy-Item (Join-Path $AppDir 'config.json') $Backup
+  $hasState = Test-Path (Join-Path $AppDir 'state.json')
+  if ($hasState) { Copy-Item (Join-Path $AppDir 'state.json') $Backup }
+  $hadTask = [bool](Get-ScheduledTask -TaskName 'ZaloSync_Daily' -ErrorAction SilentlyContinue)
+  if ($hadTask) { $taskXml = Export-ScheduledTask -TaskName 'ZaloSync_Daily'; [IO.File]::WriteAllText((Join-Path $Backup 'task.xml'), $taskXml) }
+  Write-Host "[schedule] sao lưu config/state/task → $Backup (task có sẵn: $hadTask)"
+}
 $proc = Start-Process $Exe -PassThru
 for ($i = 0; $i -lt 120 -and $proc.MainWindowHandle -eq 0; $i++) { Start-Sleep -Milliseconds 500; $proc.Refresh() }
 if ($proc.MainWindowHandle -eq 0) { throw "Không thấy cửa sổ chính của $Exe" }
@@ -90,16 +144,104 @@ function Get-ClientRect {
   New-Object System.Windows.Rect($p.X, $p.Y, $r.R, $r.B)
 }
 
-function Save-Shot([string]$name) {
-  $r = New-Object W+RECT; [W]::GetWindowRect($h, [ref]$r) | Out-Null
+function Save-Shot([string]$name, [IntPtr]$hwnd = $h) {
+  $r = New-Object W+RECT; [W]::GetWindowRect($hwnd, [ref]$r) | Out-Null
   $bmp = New-Object System.Drawing.Bitmap ($r.R - $r.L), ($r.B - $r.T)
   $g = [System.Drawing.Graphics]::FromImage($bmp); $dc = $g.GetHdc()
-  [W]::PrintWindow($h, $dc, 2) | Out-Null
+  [W]::PrintWindow($hwnd, $dc, 2) | Out-Null
   $g.ReleaseHdc($dc); $g.Dispose()
   $bmp.Save((Join-Path $ShotDir "$name.png"), [System.Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose()
 }
 
 function Fail([string]$msg) { $failures.Add($msg); Write-Host "  ✗ $msg" -ForegroundColor Red }
+
+# ---------- tiện ích cho -Schedule ----------
+$TaskName = 'ZaloSync_Daily'
+$CfgFile = Join-Path $AppDir 'config.json'
+$StateFile = Join-Path $AppDir 'state.json'
+$LogFile = Join-Path $AppDir 'logs\daily_sync.log'
+$MeUser = "$env:USERDOMAIN\$env:USERNAME"
+function Wait-Soft([scriptblock]$cond, [string]$what, [int]$sec = 20) { try { Wait-For $cond $what $sec } catch { $null } }
+function Get-Task { Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue }
+function Get-CfgTime { ((Get-Content $CfgFile -Raw -Encoding UTF8) | ConvertFrom-Json)._app.scheduleTime }
+function Get-DailyTime {
+  $t = Get-Task; if (-not $t) { return $null }
+  $d = @($t.Triggers | Where-Object { $_.CimClass.CimClassName -eq 'MSFT_TaskDailyTrigger' }) | Select-Object -First 1
+  if ($d -and $d.StartBoundary -match 'T(\d\d:\d\d)') { $Matches[1] }
+}
+# Tác vụ thật phải khớp định nghĩa: <exe> --scheduled, Daily đúng giờ + Logon(user hiện tại, Delay PT10M), StartWhenAvailable, IgnoreNew, không admin.
+function Check-Task([string]$tag, [string]$time) {
+  $t = Get-Task
+  if (-not $t) { Fail "[$tag] không thấy tác vụ $TaskName"; return }
+  $a = @($t.Actions)[0]
+  if (([string]$a.Execute).Trim('"') -ine [IO.Path]::GetFullPath($Exe)) { Fail "[$tag] exe của tác vụ: '$($a.Execute)' ≠ '$([IO.Path]::GetFullPath($Exe))'" }
+  if ($a.Arguments -ne '--scheduled') { Fail "[$tag] tham số của tác vụ: '$($a.Arguments)'" }
+  $daily = @($t.Triggers | Where-Object { $_.CimClass.CimClassName -eq 'MSFT_TaskDailyTrigger' })
+  $logon = @($t.Triggers | Where-Object { $_.CimClass.CimClassName -eq 'MSFT_TaskLogonTrigger' })
+  if ($daily.Count -ne 1) { Fail "[$tag] cần đúng 1 trigger Daily (có $($daily.Count))" }
+  elseif ((Get-DailyTime) -ne $time) { Fail "[$tag] giờ trigger Daily: '$(Get-DailyTime)' ≠ '$time'" }
+  if ($logon.Count -ne 1) { Fail "[$tag] cần đúng 1 trigger Logon (có $($logon.Count))" }
+  else {
+    if ($logon[0].UserId -ine $MeUser) { Fail "[$tag] Logon.UserId '$($logon[0].UserId)' ≠ '$MeUser'" }
+    if ($logon[0].Delay -ne 'PT10M') { Fail "[$tag] Logon.Delay '$($logon[0].Delay)' ≠ PT10M" }
+  }
+  if ($t.Settings.StartWhenAvailable -ne $true) { Fail "[$tag] StartWhenAvailable không bật" }
+  if ("$($t.Settings.MultipleInstances)" -ne 'IgnoreNew') { Fail "[$tag] MultipleInstances = '$($t.Settings.MultipleInstances)'" }
+  if ("$($t.Principal.LogonType)" -ne 'Interactive') { Fail "[$tag] LogonType = '$($t.Principal.LogonType)'" }
+  if ("$($t.Principal.RunLevel)" -eq 'Highest') { Fail "[$tag] tác vụ chạy quyền admin (RunLevel Highest)" }
+  if (Test-Path (Join-Path $AppDir 'run_sync.bat')) { Fail "[$tag] vẫn còn run_sync.bat" }
+}
+# Nhãn bảng điều khiển: BẬT · <giờ> (kế tiếp dd/MM/yyyy <giờ>) — giờ "kế tiếp" phải đúng giờ cấu hình (không lệch +7h).
+function Check-Label([string]$tag, [string]$time) {
+  $rx = "Tự động hằng ngày: BẬT · $time\s+\(kế tiếp \d\d/\d\d/\d{4} $time\)"
+  $l = Wait-Soft { $x = Find-Text 'Số nhóm theo dõi'; if ($x -and $x.Text -match $rx) { $x } } "nhãn lịch BẬT $time" 20
+  if (-not $l) { Fail "[$tag] nhãn lịch không khớp /$rx/: '$((Find-Text 'Số nhóm theo dõi').Text -replace '\s+', ' ')'" }
+  else { Write-Host "[$tag] OK nhãn: $(($l.Text -split "`n")[1].Trim())" }
+}
+function Check-LabelOff([string]$tag) {
+  $l = Wait-Soft { $x = Find-Text 'Số nhóm theo dõi'; if ($x -and $x.Text -match 'Tự động hằng ngày: TẮT') { $x } } 'nhãn lịch TẮT' 20
+  if (-not $l) { Fail "[$tag] nhãn lịch không là TẮT: '$((Find-Text 'Số nhóm theo dõi').Text -replace '\s+', ' ')'" }
+}
+# Hộp thoại MessageBox (#32770) của tiến trình app
+function Get-Dialogs([int]$procId) { @([W]::Tops() | Where-Object { $_.Pid -eq $procId -and $_.Cls -eq '#32770' }) }
+function Dialog-Text($d) { (@([W]::Kids($d.H) | Where-Object { $_.Kind -eq 'Static' -and $_.Text } | ForEach-Object { $_.Text }) -join "`n") }
+function Close-Dialog($d) {
+  $ok = [W]::Kids($d.H) | Where-Object { $_.Kind -eq 'Button' } | Select-Object -First 1
+  if ($ok) { [W]::PostMessage($ok.H, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null } else { [W]::PostMessage($d.H, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null }
+  Start-Sleep -Milliseconds 500
+}
+function Expect-NoDialog([string]$tag) {
+  Start-Sleep -Milliseconds 1500
+  foreach ($d in (Get-Dialogs $proc.Id)) { Save-Shot "$tag-hop-thoai" $d.H; Fail "[$tag] hộp thoại bất ngờ '$($d.Title)': $(Dialog-Text $d)"; Close-Dialog $d }
+}
+function Wait-Dashboard {
+  Wait-For { $proc.Refresh(); $proc.MainWindowHandle -ne 0 } 'cửa sổ chính' 60 | Out-Null
+  $script:h = $proc.MainWindowHandle
+  Wait-For { Find-Text 'Số nhóm theo dõi' } 'bảng điều khiển' | Out-Null
+  Wait-For { Get-Leaves @('BUTTON') | Where-Object { $_.Text -match '(Bật|Tắt) tự động$' } } 'nút lịch' | Out-Null
+}
+function Stop-App { Get-Process ZaloSync -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep -Milliseconds 800 }
+# Khôi phục config/state nguyên byte + tác vụ, rồi mở lại app để tự đối soát tác vụ về giờ gốc (chạy trong finally).
+function Restore-Schedule {
+  Write-Host '[schedule] khôi phục config/state/tác vụ…'
+  Stop-App
+  Copy-Item (Join-Path $Backup 'config.json') $CfgFile -Force
+  if ($hasState) { Copy-Item (Join-Path $Backup 'state.json') $StateFile -Force }
+  foreach ($f in 'config.json', 'state.json') {
+    if (($f -eq 'state.json') -and -not $hasState) { continue }
+    if ((Get-FileHash (Join-Path $Backup $f)).Hash -ne (Get-FileHash (Join-Path $AppDir $f)).Hash) { Fail "[restore] $f chưa khớp bản sao lưu" }
+  }
+  if (-not $hadTask) { if (Get-Task) { Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false }; return }
+  if (-not (Get-Task)) { Register-ScheduledTask -Xml $taskXml -TaskName $TaskName -User $MeUser -Force | Out-Null; Write-Host '[restore] đăng ký lại tác vụ từ XML sao lưu' }
+  $script:proc = Start-Process $Exe -PassThru
+  Wait-Dashboard
+  $want = Get-CfgTime
+  Wait-Soft { (Get-DailyTime) -eq $want } "tác vụ về giờ $want" 30 | Out-Null
+  Start-Sleep -Milliseconds 1000
+  Stop-App
+  Check-Task 'restore' $want
+  Write-Host "[restore] tác vụ: $((Get-Task).Actions[0].Execute) $((Get-Task).Actions[0].Arguments), Daily $(Get-DailyTime)"
+}
 
 # $navButtons: nút phải nằm góc dưới-phải; -logFillsBottom: log phải giãn xuống đáy.
 function Check-Screen([string]$screen, [string[]]$navButtons = @(), [switch]$logFillsBottom) {
@@ -151,6 +293,30 @@ try {
   Wait-For { Get-Leaves @('BUTTON') | Where-Object { $_.Text -match '(Bật|Tắt) tự động$' } } 'trạng thái lịch' | Out-Null
   try { Wait-For { Get-Leaves @('EDIT') | Where-Object { $_.Text.Length -gt 0 } } 'log' 10 | Out-Null } catch { Write-Host '  (log trống)' }
   Check-Screen 'dashboard' -logFillsBottom
+
+  if ($Schedule) {
+    $cfgTime = Get-CfgTime
+    # A. tác vụ thật + nhãn khớp định nghĩa
+    Check-Task 'A' $cfgTime
+    Check-Label 'A' $cfgTime
+    Save-Shot 'A-dashboard'
+    Write-Host "[A] tác vụ + nhãn khớp (giờ cấu hình $cfgTime)"
+
+    # B. Tắt → tác vụ biến mất, nhãn TẮT; Bật → tạo lại đủ định nghĩa; cả hai không hiện hộp thoại
+    Click '⏸ Tắt tự động'
+    if (-not (Wait-Soft { Find-Button '⏰ Bật tự động' } 'nút đổi sang Bật' 30)) { Fail '[B] sau khi Tắt, nút không đổi thành "⏰ Bật tự động"' }
+    if (-not (Wait-Soft { -not (Get-Task) } 'tác vụ bị xoá' 15)) { Fail '[B] bấm Tắt nhưng tác vụ vẫn còn' }
+    Check-LabelOff 'B-tat'
+    Save-Shot 'B-tat'
+    Expect-NoDialog 'B-tat'
+    Click '⏰ Bật tự động'
+    if (-not (Wait-Soft { Find-Button '⏸ Tắt tự động' } 'nút đổi sang Tắt' 30)) { Fail '[B] sau khi Bật, nút không đổi thành "⏸ Tắt tự động"' }
+    Check-Task 'B-bat' $cfgTime
+    Check-Label 'B-bat' $cfgTime
+    Save-Shot 'B-bat'
+    Expect-NoDialog 'B-bat'
+    Write-Host '[B] Tắt/Bật tự động đúng'
+  }
 
   # bản cài tên cũ phải được app tự chuyển sang + dọn ngay khi mở (lib/legacy_migrate.js)
   if (Test-Path (Join-Path $env:LOCALAPPDATA 'ZaloSync568')) { Fail 'chưa dọn thư mục bản cũ %LOCALAPPDATA%\ZaloSync568' }
@@ -212,11 +378,109 @@ try {
   # ...và điền sẵn thư mục dữ liệu đang dùng, không phải thư mục mặc định
   if (-not (Get-Leaves @('EDIT') | Where-Object { $_.Text -eq $dataDir })) { Fail "Bước 4 không điền sẵn thư mục dữ liệu đang dùng ($dataDir)" }
   Check-Screen 'step4' -navButtons @('✔ Hoàn tất & lưu')
+
+  if ($Schedule) {
+    # C. đổi giờ ở Bước 4: DateTimePicker (UpDown, mặc định ô giờ) — bấm chuột vào ô giờ rồi gửi VK_UP tới control
+    $dp = Get-Leaves @('SysDateTimePick32') | Select-Object -First 1
+    if (-not $dp) { throw 'Bước 4 không có SysDateTimePick32' }
+    $t0 = [datetime]::Parse($dp.Text).ToString('HH:mm')
+    $want = [datetime]::Parse($dp.Text).AddHours(1).ToString('HH:mm')
+    [W]::SetForegroundWindow($h) | Out-Null
+    [W]::PostMessage($dp.H, 0x0201, [IntPtr]1, [IntPtr](8 * 65536 + 10)) | Out-Null   # WM_LBUTTONDOWN (10,8) → chọn ô giờ
+    [W]::PostMessage($dp.H, 0x0202, [IntPtr]::Zero, [IntPtr](8 * 65536 + 10)) | Out-Null
+    Start-Sleep -Milliseconds 300
+    [W]::PostMessage($dp.H, 0x0100, [IntPtr]0x26, [IntPtr]1) | Out-Null               # WM_KEYDOWN VK_UP
+    [W]::PostMessage($dp.H, 0x0101, [IntPtr]0x26, [IntPtr]0xC0000001) | Out-Null      # WM_KEYUP
+    Start-Sleep -Milliseconds 400
+    $now = [datetime]::Parse((Get-Leaves @('SysDateTimePick32') | Select-Object -First 1).Text).ToString('HH:mm')
+    if ($now -ne $want) { Fail "[C] DateTimePicker: '$t0' → '$now', mong đợi '$want'" }
+    Write-Host "[C] DateTimePicker $t0 → $now"
+    Save-Shot 'C-step4-doi-gio'
+    Click '✔ Hoàn tất & lưu'
+    $newTime = $now
+    if (-not (Wait-Soft { Find-Text 'Số nhóm theo dõi' } 'bảng điều khiển sau khi lưu' 60)) { Fail '[C] không về bảng điều khiển sau Hoàn tất' }
+    Check-Label 'C' $newTime
+    Expect-NoDialog 'C'
+    if ((Get-CfgTime) -ne $newTime) { Fail "[C] config _app.scheduleTime = '$(Get-CfgTime)' ≠ '$newTime'" }
+    Check-Task 'C' $newTime
+    Save-Shot 'C-dashboard'
+    Write-Host "[C] đổi giờ ${t0} → ${newTime}: config + tác vụ + nhãn đều theo giờ mới"
+
+    # D. đường lỗi: PATH không có WindowsPowerShell → mọi lệnh Task Scheduler của CLI phải hỏng và app phải báo ra
+    Stop-App
+    $xmlBefore = Export-ScheduledTask -TaskName $TaskName
+    $psi = New-Object System.Diagnostics.ProcessStartInfo $Exe
+    $psi.UseShellExecute = $false
+    $psi.EnvironmentVariables['PATH'] = 'C:\Windows\System32;C:\Windows'
+    $proc = [System.Diagnostics.Process]::Start($psi)
+    Wait-Dashboard
+    if (-not (Find-Button '⏰ Bật tự động')) { Fail '[D] khi truy vấn lịch hỏng, nút phải là "⏰ Bật tự động"' }
+    Click '⏰ Bật tự động'
+    $dlg = Wait-Soft { Get-Dialogs $proc.Id | Select-Object -First 1 } 'hộp thoại lỗi' 30
+    if (-not $dlg) { Fail '[D] bấm Bật khi đăng ký hỏng nhưng KHÔNG hiện hộp thoại' }
+    else {
+      $dt = Dialog-Text $dlg
+      Save-Shot 'D-hop-thoai-loi' $dlg.H
+      if (-not $dt.Contains('Không bật được lịch chạy tự động')) { Fail "[D] hộp thoại sai nội dung: '$($dlg.Title)' / $dt" }
+      else { Write-Host "[D] OK hộp thoại '$($dlg.Title)': $(($dt -split "`n")[0..1] -join ' | ')" }
+      Close-Dialog $dlg
+    }
+    if ((Export-ScheduledTask -TaskName $TaskName) -ne $xmlBefore) { Fail '[D] tác vụ thật bị đổi dù đăng ký lỗi' }
+    Stop-App
+
+    # E. tác vụ chạy ẨN, nhánh bỏ qua (lastSuccessAt = bây giờ → không đến hạn → KHÔNG đồng bộ thật)
+    if (-not (Get-Task)) { Fail '[E] không có tác vụ để chạy' }
+    else {
+      $st = Get-Content $StateFile -Raw -Encoding UTF8 | ConvertFrom-Json
+      $stamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'")
+      $st | Add-Member -NotePropertyName lastSuccessAt -NotePropertyValue $stamp -Force
+      [IO.File]::WriteAllText($StateFile, ($st | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
+      $logLen0 = if (Test-Path $LogFile) { (Get-Item $LogFile).Length } else { 0 }
+      function Read-NewLog { if (-not (Test-Path $LogFile)) { return '' }
+        $fs = [IO.File]::Open($LogFile, 'Open', 'Read', 'ReadWrite'); try { [void]$fs.Seek($logLen0, 'Begin'); $sr = New-Object IO.StreamReader($fs, [Text.Encoding]::UTF8); $sr.ReadToEnd() } finally { $fs.Dispose() } }
+      $seen = @{}; foreach ($w in [W]::Tops()) { $seen[[string]$w.H] = 1 }
+      $badProcs = 'ZaloSync', 'node', 'cmd', 'conhost', 'OpenConsole', 'WindowsTerminal', 'powershell'
+      $startAt = Get-Date
+      Start-ScheduledTask -TaskName $TaskName
+      $sw = [Diagnostics.Stopwatch]::StartNew(); $sawRun = $false; $newLog = ''
+      while ($sw.Elapsed.TotalSeconds -lt 60) {
+        foreach ($w in [W]::Tops()) {
+          if ($seen.ContainsKey([string]$w.H)) { continue }
+          $seen[[string]$w.H] = 1
+          $pn = (Get-Process -Id $w.Pid -ErrorAction SilentlyContinue).ProcessName
+          if ($badProcs -contains $pn) { Fail "[E] lượt chạy tự động hiện cửa sổ: $pn '$($w.Title)' [$($w.Cls)]" }
+        }
+        $newLog = Read-NewLog
+        if ($newLog -match 'đến hạn') {   # khẩn cấp: sắp đồng bộ thật
+          Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+          Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -match 'daily_sync_568\.js' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+          Fail '[E] log báo "đến hạn" dù lastSuccessAt = bây giờ → đã dừng tác vụ + giết engine'
+          break
+        }
+        $state = "$((Get-Task).State)"
+        if ($state -ne 'Ready') { $sawRun = $true }
+        if ($state -eq 'Ready' -and ($sawRun -or $newLog.Contains('bỏ qua'))) { break }
+        Start-Sleep -Milliseconds 100
+      }
+      if ($sw.Elapsed.TotalSeconds -ge 60) { Fail '[E] hết 60s mà tác vụ chưa về Ready' }
+      $newLog = Read-NewLog
+      if ($newLog -notmatch '\[TỰ ĐỘNG\].*bỏ qua — đã đồng bộ') { Fail "[E] log không có dòng '[TỰ ĐỘNG] … bỏ qua': '$($newLog.Trim())'" }
+      $r = Wait-Soft { $i = Get-ScheduledTaskInfo -TaskName $TaskName; if ($i.LastRunTime -ge $startAt.AddSeconds(-2)) { $i } } 'LastRunTime mới' 10
+      if (-not $r) { Fail '[E] LastRunTime không cập nhật sau Start-ScheduledTask' }
+      elseif ($r.LastTaskResult -ne 0) { Fail "[E] LastTaskResult = $($r.LastTaskResult), mong đợi 0" }
+      $st2 = Get-Content $StateFile -Raw -Encoding UTF8 | ConvertFrom-Json
+      if ($st2.lastSuccessAt -ne $stamp) { Fail "[E] lastSuccessAt đổi: $stamp → $($st2.lastSuccessAt)" }
+      if (Get-Process ZaloSync -ErrorAction SilentlyContinue) { Fail '[E] còn tiến trình ZaloSync sau khi tác vụ xong' }
+      Write-Host "[E] chạy ẩn trong $([int]$sw.Elapsed.TotalMilliseconds) ms, exit $($r.LastTaskResult); log: $(($newLog.Trim() -split "`n")[-1])"
+    }
+  }
 }
 finally {
   Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+  if ($Schedule) { try { Restore-Schedule } catch { Fail "[restore] $($_.Exception.Message)" } }
 }
 
 Write-Host "`nẢnh chụp: $ShotDir"
 if ($failures.Count -gt 0) { Write-Host "FAIL: $($failures.Count) lỗi" -ForegroundColor Red; exit 1 }
 Write-Host 'PASS: bố cục + mở thư mục + xuất log + thiết lập lại đều đúng' -ForegroundColor Green
+if ($Schedule) { Write-Host 'PASS (-Schedule): A tác vụ+nhãn khớp · B tắt/bật · C đổi giờ qua thiết lập lại · D lỗi báo rõ · E chạy ẩn bỏ qua (đã khôi phục config/state/tác vụ)' -ForegroundColor Green }

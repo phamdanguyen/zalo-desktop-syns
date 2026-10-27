@@ -24,13 +24,17 @@ CÁCH DÙNG (chỉ 1 file, không cần cài gì):
        - Bước 2: khóa được TỰ DÒ (không cần tìm hay nhập gì).
        - Bước 3: tích chọn nhóm cần đồng bộ.
        - Bước 4: chọn thư mục lưu + giờ chạy tự động, rồi "Hoàn tất".
-  4. Ở Bảng điều khiển: "Bật tự động" để chạy hằng ngày, hoặc "Chạy ngay".
+  4. Xong là lịch chạy tự động hằng ngày ĐÃ BẬT (tắt/bật ở Bảng điều khiển); muốn chạy luôn thì bấm "Chạy ngay".
   5. Gặp lỗi? Bấm "Xuất log" → gửi file vừa tạo (thư mục baocao tự mở ra) cho AI / người hỗ trợ.
 
 CHẠY NỀN:
   - Bấm X hoặc thu nhỏ → ứng dụng ẩn xuống KHAY HỆ THỐNG (gần đồng hồ),
     biểu tượng ô vuông cam chữ "Z" cho biết nó vẫn đang chạy nền.
   - Bấm đúp biểu tượng khay để mở lại; chuột phải để "Chạy ngay" hoặc "Thoát hẳn".
+  - Lịch tự động chạy ngầm (không hiện cửa sổ), kể cả khi đã "Thoát hẳn".
+    Máy tắt/ngủ đúng giờ hẹn → tự chạy bù ~10 phút sau khi đăng nhập Windows (hoặc khi máy thức),
+    1 lượt bù lấy đủ dữ liệu mọi ngày bị lỡ. Đừng xoá/di chuyển ZaloSync.exe (lịch gọi đúng file này);
+    lỡ di chuyển thì mở app từ chỗ mới 1 lần để lịch tự cập nhật.
 
 NÂNG CẤP TỪ BẢN CŨ:
   - Thoát hẳn bản cũ (chuột phải biểu tượng ở khay → "Thoát hẳn") rồi mở bản mới.
