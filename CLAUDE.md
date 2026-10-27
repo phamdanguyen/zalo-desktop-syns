@@ -61,9 +61,12 @@ Engine (../scripts/daily_sync_568.js) the actual sync pipeline (pre-existing, un
 
 - **GUI ↔ CLI protocol**: every `cli.js` subcommand prints exactly **one line of JSON** to stdout
   (except `run`, which streams engine log lines). `Program.cs` parses that JSON. Keep this contract
-  when adding subcommands — one JSON object per invocation, exit 0 on success.
-- **CLI ↔ engine**: `runner.js` / `task_scheduler.js` spawn the engine as `node daily_sync_568.js
-  --config <configFile> [--all] [--dry-run]`, also passing `ZALO_568_CONFIG` env. The engine is
+  when adding subcommands — one JSON object per invocation, exit 0 on success. Failures = one line
+  `{ok:false,error}` + exit 1 (GUI shows it — never swallow). The GUI passes its own path as env
+  `ZALOSYNC_EXE` on every call (the scheduled task runs that exe).
+- **CLI ↔ engine**: only `runner.js` spawns the engine, as `node daily_sync_568.js
+  --config <configFile> [--all] [--dry-run]`, also passing `ZALO_568_CONFIG` env. Scheduled runs go through
+  it too (`ZaloSync.exe --scheduled` → `cli.js run --scheduled` → `runner.runScheduled`). The engine is
   pure Node stdlib (`node:sqlite`, `crypto`, `fs`, `path`, `child_process`) — **requires Node
   >= 22.5** for a usable `node:sqlite`.
 
@@ -80,10 +83,11 @@ node cli.js verify --dir <coreDir> --key <hex32> # confirm a key opens Index.db
 node cli.js discover --dir <coreDir> --key <hex32>
 node cli.js get-config | status | schedule-get
 node cli.js save-config --payload <file.json>
-node cli.js schedule-set --time HH:MM            # register daily Scheduled Task (no admin)
-node cli.js schedule-refresh                     # task installed → rewrite run_sync.bat for the CURRENT runtime (GUI calls on start)
+node cli.js schedule-set --time HH:MM            # register the task (no admin) — needs env ZALOSYNC_EXE (GUI sets it)
+node cli.js schedule-refresh                     # task installed + differs from config time / current exe → re-register (GUI: on start + after setup)
 node cli.js migrate                              # one-time: carry an old-name "ZaloSync568" install (config/cursor/task) over (GUI calls FIRST)
 node cli.js run [--all] [--dry-run]              # streams engine log; exits with engine's code
+node cli.js run --scheduled                      # what the task runs: --all only if due (missed slot → catch-up exactly once)
 node cli.js export-log [--out <file>]            # last run's log + status + config (key redacted) → 1 file for AI debugging
 
 # --- lib module smoke tests (each has a require.main === module runner) ---
@@ -93,7 +97,7 @@ node lib/group_discover.js <coreDir> <hex32>
 # --- engine tests (node:test), run from repo root ../ ---
 node --test scripts/daily_sync_568.test.js
 node --test scripts/lib_audit.test.js scripts/lib_snapshot.test.js
-node --test scripts/                             # all engine tests
+node --test scripts/*.test.js                    # all engine tests (`node --test scripts/` = MODULE_NOT_FOUND on this Node)
 
 # --- app tests ---
 node --test test/*.test.js                       # app/lib unit tests (kept out of lib/ — build.ps1 embeds lib/*.js)
@@ -120,13 +124,14 @@ powershell -ExecutionPolicy Bypass -File winform/make_icon.ps1     # regenerate 
 | `engine_path.js` | Locate the engine dir: `ZALOSYNC_ENGINE_DIR` env → `../engine` (release layout) → `../scripts` (dev layout). |
 | `log_export.js` | `export-log`: build one text file = env + status + config with the SQLCipher key redacted (also scrubbed from log text) + the latest run's log (from the last `KHỞI CHẠY` / `TASK KHOI CHAY` banner). Default target `<reportDir>/ZaloSync_log_<stamp>.txt`. Never write the key out. |
 | `legacy_migrate.js` | `migrate`: one-time move of an old-name install (`%LOCALAPPDATA%\ZaloSync568` → `ZaloSync`: config with cursor/manifest paths repointed + cursor/manifest/state/logs; `ZaloSync568_Daily` → install `ZaloSync_Daily` at the same time, THEN unregister old; then delete the old dir). Task-query error → keeps old dir and retries next start. The carried old `logs/daily_sync.log` is archived as `daily_sync_ban_cu.log` (GUI log starts clean). Independently, `upgradeConfig` (app configs = have `_app`): adds `projectCode: ''` + `scheduledTaskName: 'ZaloSync_Daily'`, and renames the old DEFAULT folder `Documents\ZaloSync568` → `Documents\ZaloSync` in place when config points into it and the new one doesn't exist yet (user-chosen folders untouched; rename failure → config unchanged, clear error, retried next start). |
-| `runner.js` | Spawn the engine with the user's config, stream stdout/stderr line-by-line, append to the log file, write `state.json`. Single concurrent run only. |
-| `task_scheduler.js` | Install/query/remove the daily `ZaloSync_Daily` Scheduled Task. Task runs a generated `run_sync.bat`; registered with `-User <current>` so **no admin** is needed (no `AtLogOn` trigger — that would require admin). |
+| `runner.js` | Spawn the engine with the user's config, stream stdout/stderr line-by-line, append to the log file, write `state.json` (`lastSuccessAt` = START of the last exit-0 non-dry run). Single concurrent run **across processes** (`run.lock` = pid + time; dead pid or > 6 h → stale). `runScheduled`: run `--all` only if `isRunDue`, else log `[TỰ ĐỘNG] … bỏ qua` and exit 0. |
+| `task_scheduler.js` | Install/query/remove/reconcile the `ZaloSync_Daily` Scheduled Task: action `ZaloSync.exe --scheduled` (GUI exe, headless → no cmd window), triggers Daily HH:MM + **AtLogOn of the current user** (delay 10 min, catch-up after reboot) + StartWhenAvailable (missed while asleep), MultipleInstances IgnoreNew, `-User <current>` Interactive → **no admin** (only an ALL-users logon trigger needs admin). `isRunDue`: due ⇔ no successful run started since the latest slot (2-min grace). `install`/`uninstall` re-query and throw on mismatch. |
 
 ## Data & state locations (important)
 
 - **Per-machine user data lives OUTSIDE the program folder**, under `%LOCALAPPDATA%\ZaloSync\`
-  (`config.json`, `cursor.json`, `manifest.json`, `state.json`, `logs/`, generated `run_sync.bat`).
+  (`config.json`, `cursor.json`, `manifest.json`, `state.json`, `logs/`, `run.lock` while a sync runs). An old
+  `run_sync.bat` there is legacy (pre-2026-10-27 task action) — `install` deletes it.
   This survives app updates — never relocate config/state back into the install dir.
 - Default sync output: `%USERPROFILE%\Documents\ZaloSync\{data,baocao}` (old default `Documents\ZaloSync568` is renamed by `migrate`; user-chosen paths are kept).
 - `config.json` is the single source of truth the engine reads via `--config`; the GUI rewrites it
@@ -155,8 +160,12 @@ layout still works.
   wrong folder. `open-folder` and `status.dataDir` already normalize; the wizard uses `Path.GetFullPath`.
 - **"⚙ Thiết lập lại" must start from the current config** (`savedCfg`): keep selected groups and prefill
   project/folder/time — otherwise "Hoàn tất" silently resets them to defaults.
-- **Each new exe build = new runtime dir** (old ones pruned) and `run_sync.bat` embeds the runtime's node path —
-  hence the GUI's `schedule-refresh` on start. Don't remove it.
+- **Each new exe build = new runtime dir** (old ones pruned). The task calls the exe itself (`--scheduled` →
+  `EnsureRuntime` re-extracts if needed), so it survives new builds; the GUI's `schedule-refresh` on start re-points
+  the task when the exe moved / the time changed / an old bat-based task exists. Don't remove it. `--scheduled` must
+  never show UI (no MessageBox at 4 a.m.) — errors go to `logs/daily_sync.log`.
+- **Schedule changes must be loud**: toggle / wizard save show a MessageBox when `schedule-*` returns `ok:false`.
+  The wizard's first-time "Hoàn tất" enables the schedule (`schedule-set`); "Thiết lập lại" reconciles (`schedule-refresh`).
 - **BOM**: `.NET` writes JSON payloads as UTF-8 **with BOM**; `cli.js save-config` strips a leading
   BOM before `JSON.parse`. Preserve that when touching config I/O.
 - **`dev/` is not shipped**: forensic/derivation probes (key-recovery R&D). Not referenced by the
