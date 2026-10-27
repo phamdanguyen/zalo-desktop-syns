@@ -23,7 +23,10 @@
 #      tác vụ thật không đổi.
 #   E. Start-ScheduledTask khi đã đồng bộ sau mốc lịch (lastSuccessAt = bây giờ) → chạy ẨN (không cửa sổ mới nào của
 #      ZaloSync/node/cmd/conhost/terminal/powershell), exit 0, log có "[TỰ ĐỘNG] … bỏ qua", lastSuccessAt không đổi.
-#      Không bao giờ chạy đồng bộ thật: nếu log báo "đến hạn" → dừng tác vụ + giết node engine ngay và FAIL.
+#      Không bao giờ chạy đồng bộ thật: nếu log báo "chạy (" → dừng tác vụ + giết node engine ngay và FAIL.
+#   A/B còn kiểm mục Startup HKCU\...\Run\ZaloSync_Daily = "<exe>" --tray (có khi Bật, mất khi Tắt; khôi phục trong finally).
+#   F. exe --tray: sống nhưng không cửa sổ nào hiện; mở exe lần nữa → bản đang chạy hiện cửa sổ, tiến trình mới thoát exit 0.
+#   G. WM_QUERYENDSESSION phải trả ≠ 0 (không chặn tắt máy); bấm X (SC_CLOSE) chỉ ẩn xuống tray.
 # Chạy: powershell -NoProfile -ExecutionPolicy Bypass -File winform\test_ui.ps1 -Schedule
 param(
   [string]$Exe = (Join-Path $PSScriptRoot 'build\ZaloSync.exe'),
@@ -57,10 +60,12 @@ public static class W {
   [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
-  public static List<Top> Tops() {
+  [DllImport("user32.dll", EntryPoint = "SendMessageW")] public static extern IntPtr SendMsg(IntPtr h, int m, IntPtr w, IntPtr l);
+  public static List<Top> Tops() { return Tops(false); }
+  public static List<Top> Tops(bool includeHidden) {
     var list = new List<Top>();
     EnumWindows((h, l) => {
-      if (!IsWindowVisible(h)) return true;
+      if (!includeHidden && !IsWindowVisible(h)) return true;
       uint pid; GetWindowThreadProcessId(h, out pid);
       var c = new StringBuilder(256); GetClassName(h, c, 256);
       var t = new StringBuilder(512); GetWindowText(h, t, 512);
@@ -113,6 +118,8 @@ if ($Schedule) {
   if ($hasState) { Copy-Item (Join-Path $AppDir 'state.json') $Backup }
   $hadTask = [bool](Get-ScheduledTask -TaskName 'ZaloSync_Daily' -ErrorAction SilentlyContinue)
   if ($hadTask) { $taskXml = Export-ScheduledTask -TaskName 'ZaloSync_Daily'; [IO.File]::WriteAllText((Join-Path $Backup 'task.xml'), $taskXml) }
+  $runData = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'ZaloSync_Daily' -ErrorAction SilentlyContinue).ZaloSync_Daily   # mục Startup (null = chưa có)
+  Write-Host "[schedule] mục Run ZaloSync_Daily trước test: $runData"
   Write-Host "[schedule] sao lưu config/state/task → $Backup (task có sẵn: $hadTask)"
 }
 $proc = Start-Process $Exe -PassThru
@@ -163,6 +170,7 @@ $LogFile = Join-Path $AppDir 'logs\daily_sync.log'
 $MeUser = "$env:USERDOMAIN\$env:USERNAME"
 function Wait-Soft([scriptblock]$cond, [string]$what, [int]$sec = 20) { try { Wait-For $cond $what $sec } catch { $null } }
 function Get-Task { Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue }
+function Get-RunValue { (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name $TaskName -ErrorAction SilentlyContinue).$TaskName }
 function Get-CfgTime { ((Get-Content $CfgFile -Raw -Encoding UTF8) | ConvertFrom-Json)._app.scheduleTime }
 function Get-DailyTime {
   $t = Get-Task; if (-not $t) { return $null }
@@ -190,6 +198,8 @@ function Check-Task([string]$tag, [string]$time) {
   if ("$($t.Principal.LogonType)" -ne 'Interactive') { Fail "[$tag] LogonType = '$($t.Principal.LogonType)'" }
   if ("$($t.Principal.RunLevel)" -eq 'Highest') { Fail "[$tag] tác vụ chạy quyền admin (RunLevel Highest)" }
   if (Test-Path (Join-Path $AppDir 'run_sync.bat')) { Fail "[$tag] vẫn còn run_sync.bat" }
+  $wantRun = '"' + [IO.Path]::GetFullPath($Exe) + '" --tray'
+  if ((Get-RunValue) -ne $wantRun) { Fail "[$tag] mục Startup Run\$TaskName = '$(Get-RunValue)' ≠ '$wantRun'" }
 }
 # Nhãn bảng điều khiển: BẬT · <giờ> (kế tiếp dd/MM/yyyy <giờ>) — giờ "kế tiếp" phải đúng giờ cấu hình (không lệch +7h).
 function Check-Label([string]$tag, [string]$time) {
@@ -231,6 +241,8 @@ function Restore-Schedule {
     if (($f -eq 'state.json') -and -not $hasState) { continue }
     if ((Get-FileHash (Join-Path $Backup $f)).Hash -ne (Get-FileHash (Join-Path $AppDir $f)).Hash) { Fail "[restore] $f chưa khớp bản sao lưu" }
   }
+  $rk = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+  if ($null -ne $runData) { Set-ItemProperty $rk -Name $TaskName -Value $runData } else { Remove-ItemProperty $rk -Name $TaskName -ErrorAction SilentlyContinue }
   if (-not $hadTask) { if (Get-Task) { Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false }; return }
   if (-not (Get-Task)) { Register-ScheduledTask -Xml $taskXml -TaskName $TaskName -User $MeUser -Force | Out-Null; Write-Host '[restore] đăng ký lại tác vụ từ XML sao lưu' }
   $script:proc = Start-Process $Exe -PassThru
@@ -240,6 +252,7 @@ function Restore-Schedule {
   Start-Sleep -Milliseconds 1000
   Stop-App
   Check-Task 'restore' $want
+  Write-Host "[restore] mục Run: trước test '$runData' → sau khi app đối soát '$(Get-RunValue)'"
   Write-Host "[restore] tác vụ: $((Get-Task).Actions[0].Execute) $((Get-Task).Actions[0].Arguments), Daily $(Get-DailyTime)"
 }
 
@@ -307,6 +320,7 @@ try {
     if (-not (Wait-Soft { Find-Button '⏰ Bật tự động' } 'nút đổi sang Bật' 30)) { Fail '[B] sau khi Tắt, nút không đổi thành "⏰ Bật tự động"' }
     if (-not (Wait-Soft { -not (Get-Task) } 'tác vụ bị xoá' 15)) { Fail '[B] bấm Tắt nhưng tác vụ vẫn còn' }
     Check-LabelOff 'B-tat'
+    if (Get-RunValue) { Fail "[B] bấm Tắt nhưng mục Startup Run còn: $(Get-RunValue)" }
     Save-Shot 'B-tat'
     Expect-NoDialog 'B-tat'
     Click '⏰ Bật tự động'
@@ -414,10 +428,18 @@ try {
     $psi.EnvironmentVariables['PATH'] = 'C:\Windows\System32;C:\Windows'
     $proc = [System.Diagnostics.Process]::Start($psi)
     Wait-Dashboard
+    # nút Bật/Tắt hiện ra TRƯỚC khi handler Click được gắn (ShowDashboard gắn sau khi nạp log) → chờ log nạp xong kẻo mất cú bấm
+    Wait-Soft { Get-Leaves @('EDIT') | Where-Object { $_.Text.Length -gt 0 } } 'log' 20 | Out-Null; Start-Sleep -Milliseconds 700
     if (-not (Find-Button '⏰ Bật tự động')) { Fail '[D] khi truy vấn lịch hỏng, nút phải là "⏰ Bật tự động"' }
     Click '⏰ Bật tự động'
     $dlg = Wait-Soft { Get-Dialogs $proc.Id | Select-Object -First 1 } 'hộp thoại lỗi' 30
-    if (-not $dlg) { Fail '[D] bấm Bật khi đăng ký hỏng nhưng KHÔNG hiện hộp thoại' }
+    if (-not $dlg) {
+      Fail '[D] bấm Bật khi đăng ký hỏng nhưng KHÔNG hiện hộp thoại'
+      Save-Shot 'D-khong-co-hop-thoai'
+      Write-Host "  [D-chẩn đoán] nút: $((Get-Leaves @('BUTTON') | ForEach-Object { $_.Text }) -join ' | ')"
+      Write-Host "  [D-chẩn đoán] nhãn: $((Find-Text 'Số nhóm theo dõi').Text -replace 's+', ' ')"
+      Write-Host "  [D-chẩn đoán] cửa sổ: $(([W]::Tops($true) | Where-Object { $_.Pid -eq $proc.Id } | ForEach-Object { "[$($_.Cls)] '$($_.Title)'" }) -join '; ')"
+    }
     else {
       $dt = Dialog-Text $dlg
       Save-Shot 'D-hop-thoai-loi' $dlg.H
@@ -441,6 +463,7 @@ try {
       $seen = @{}; foreach ($w in [W]::Tops()) { $seen[[string]$w.H] = 1 }
       $badProcs = 'ZaloSync', 'node', 'cmd', 'conhost', 'OpenConsole', 'WindowsTerminal', 'powershell'
       $startAt = Get-Date
+      $ti0 = Get-ScheduledTaskInfo -TaskName $TaskName; Write-Host "[E] trước khi chạy: state=$((Get-Task).State) LastRunTime=$($ti0.LastRunTime.ToString("HH:mm:ss")) result=$($ti0.LastTaskResult)"
       Start-ScheduledTask -TaskName $TaskName
       $sw = [Diagnostics.Stopwatch]::StartNew(); $sawRun = $false; $newLog = ''
       while ($sw.Elapsed.TotalSeconds -lt 60) {
@@ -451,10 +474,10 @@ try {
           if ($badProcs -contains $pn) { Fail "[E] lượt chạy tự động hiện cửa sổ: $pn '$($w.Title)' [$($w.Cls)]" }
         }
         $newLog = Read-NewLog
-        if ($newLog -match 'đến hạn') {   # khẩn cấp: sắp đồng bộ thật
+        if ($newLog -match 'chạy \(') {   # khẩn cấp: sắp đồng bộ thật
           Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
           Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -match 'daily_sync_568\.js' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-          Fail '[E] log báo "đến hạn" dù lastSuccessAt = bây giờ → đã dừng tác vụ + giết engine'
+          Fail '[E] log báo "chạy (" dù lastSuccessAt = bây giờ → đã dừng tác vụ + giết engine'
           break
         }
         $state = "$((Get-Task).State)"
@@ -464,15 +487,63 @@ try {
       }
       if ($sw.Elapsed.TotalSeconds -ge 60) { Fail '[E] hết 60s mà tác vụ chưa về Ready' }
       $newLog = Read-NewLog
-      if ($newLog -notmatch '\[TỰ ĐỘNG\].*bỏ qua — đã đồng bộ') { Fail "[E] log không có dòng '[TỰ ĐỘNG] … bỏ qua': '$($newLog.Trim())'" }
-      $r = Wait-Soft { $i = Get-ScheduledTaskInfo -TaskName $TaskName; if ($i.LastRunTime -ge $startAt.AddSeconds(-2)) { $i } } 'LastRunTime mới' 10
-      if (-not $r) { Fail '[E] LastRunTime không cập nhật sau Start-ScheduledTask' }
-      elseif ($r.LastTaskResult -ne 0) { Fail "[E] LastTaskResult = $($r.LastTaskResult), mong đợi 0" }
+      if ($newLog -notmatch '\[TỰ ĐỘNG\].*bỏ qua — vừa đồng bộ thành công') { Fail "[E] log không có dòng '[TỰ ĐỘNG] … bỏ qua': '$($newLog.Trim())'" }
+      # LastTaskResult trước lượt này là 267011 (chưa chạy) nên "= 0" nghĩa là lượt vừa rồi đã kết thúc OK (không dựa LastRunTime: thấy lệch giờ thất thường)
+      $r = Wait-Soft { $i = Get-ScheduledTaskInfo -TaskName $TaskName; if ($i.LastTaskResult -eq 0) { $i } } 'LastTaskResult = 0' 15
+      if (-not $r) { Fail "[E] LastTaskResult = $((Get-ScheduledTaskInfo -TaskName $TaskName).LastTaskResult), mong đợi 0" }
       $st2 = Get-Content $StateFile -Raw -Encoding UTF8 | ConvertFrom-Json
       if ($st2.lastSuccessAt -ne $stamp) { Fail "[E] lastSuccessAt đổi: $stamp → $($st2.lastSuccessAt)" }
       if (Get-Process ZaloSync -ErrorAction SilentlyContinue) { Fail '[E] còn tiến trình ZaloSync sau khi tác vụ xong' }
       Write-Host "[E] chạy ẩn trong $([int]$sw.Elapsed.TotalMilliseconds) ms, exit $($r.LastTaskResult); log: $(($newLog.Trim() -split "`n")[-1])"
     }
+
+    # F. khởi động --tray: chạy ẩn (không cửa sổ/nút taskbar); mở lại exe → bản đang chạy hiện cửa sổ, tiến trình mới tự thoát (1 instance)
+    $appTitle = 'Zalo Sync — Trình thu thập dữ liệu nhóm'
+    function Get-Vis([int]$procId) { @([W]::Tops() | Where-Object { $_.Pid -eq $procId }) }
+    function Start-Probe([string]$argLine) {
+      $p = if ($argLine) { Start-Process $Exe -ArgumentList $argLine -PassThru } else { Start-Process $Exe -PassThru }
+      $null = $p.Handle   # giữ handle để đọc được ExitCode
+      $p
+    }
+    Stop-App
+    $p1 = Start-Probe '--tray'
+    Start-Sleep -Seconds 9
+    if ($p1.HasExited) { Fail "[F] --tray: tiến trình thoát sớm (exit $($p1.ExitCode))" }
+    $vis = Get-Vis $p1.Id
+    if ($vis) { Fail "[F] --tray: có cửa sổ hiện: $(($vis | ForEach-Object { "'$($_.Title)' [$($_.Cls)]" }) -join ', ')" }
+    else { Write-Host '[F] --tray: sống, không có cửa sổ cấp cao nào đang hiện' }
+
+    $p2 = Start-Probe $null
+    if (-not $p2.WaitForExit(10000)) { Fail '[F] mở exe lần 2 (không tham số): tiến trình mới không tự thoát trong 10s'; $p2.Kill() }
+    elseif ($p2.ExitCode -ne 0) { Fail "[F] mở exe lần 2: exit $($p2.ExitCode) ≠ 0" }
+    $win = Wait-Soft { Get-Vis $p1.Id | Where-Object { $_.Cls -notmatch '^#32770$' -and $_.Title -eq $appTitle } | Select-Object -First 1 } 'cửa sổ của bản đầu hiện ra' 10
+    if (-not $win) { Fail "[F] bản đang chạy không hiện cửa sổ '$appTitle' sau khi mở lại exe" }
+    else { Save-Shot 'F-hien-tu-tray' $win.H; Write-Host "[F] cửa sổ hiện: '$($win.Title)'" }
+
+    $p3 = Start-Probe '--tray'
+    if (-not $p3.WaitForExit(10000)) { Fail '[F] --tray lần 2: không tự thoát trong 10s'; $p3.Kill() }
+    elseif ($p3.ExitCode -ne 0) { Fail "[F] --tray lần 2: exit $($p3.ExitCode) ≠ 0" }
+    $all = @(Get-Process ZaloSync -ErrorAction SilentlyContinue)
+    if ($all.Count -ne 1 -or $all[0].Id -ne $p1.Id) { Fail "[F] phải còn đúng 1 tiến trình ZaloSync (pid $($p1.Id)); đang có: $(($all | ForEach-Object { $_.Id }) -join ',')" }
+    else { Write-Host '[F] 1 instance: exe lần 2 + --tray lần 2 đều tự thoát (exit 0)' }
+
+    # G. tắt máy/đăng xuất không bị chặn; đóng bằng người dùng (WM_CLOSE) chỉ ẩn xuống tray
+    if (-not $win) { Fail '[G] không kiểm được: F không hiện được cửa sổ' }
+    if ($win) {
+      # bấm X (SC_CLOSE) TRƯỚC: WinForms ghi nhớ CloseReason.WindowsShutDown sau WM_QUERYENDSESSION nên đảo thứ tự sẽ cho kết quả sai
+      [W]::PostMessage($win.H, 0x0112, [IntPtr]0xF060, [IntPtr]::Zero) | Out-Null   # WM_SYSCOMMAND SC_CLOSE = bấm X (WM_CLOSE trần bị WinForms coi là TaskManagerClosing → thoát, đúng thiết kế)
+      Start-Sleep -Milliseconds 2000
+      if ($p1.HasExited) { Fail '[G] bấm X (SC_CLOSE) làm app thoát thay vì ẩn xuống tray' }
+      elseif (Get-Vis $p1.Id) { Fail '[G] sau SC_CLOSE cửa sổ vẫn hiện' }
+      else { Write-Host '[G] SC_CLOSE: app sống, cửa sổ đã ẩn xuống tray' }
+      $hw = [W]::Tops($true) | Where-Object { $_.Pid -eq $p1.Id -and $_.Title -eq $appTitle } | Select-Object -First 1   # ShowInTaskbar đổi → HWND bị tạo lại, phải dò lại
+      if (-not $hw) { Fail "[G] không tìm thấy cửa sổ chính (ẩn) của app" }
+      $rv = [W]::SendMsg($hw.H, 0x0011, [IntPtr]::Zero, [IntPtr]2147483648L)   # WM_QUERYENDSESSION, ENDSESSION_LOGOFF
+      Write-Host "[G] WM_QUERYENDSESSION trả về $rv"
+      if ([long]$rv -eq 0) { Fail '[G] WM_QUERYENDSESSION trả về 0 → app CHẶN tắt máy/đăng xuất' }
+    }
+    Stop-App
+    if (Get-Process ZaloSync -ErrorAction SilentlyContinue) { Fail '[F/G] còn tiến trình ZaloSync sau khi dọn' }
   }
 }
 finally {
@@ -483,4 +554,4 @@ finally {
 Write-Host "`nẢnh chụp: $ShotDir"
 if ($failures.Count -gt 0) { Write-Host "FAIL: $($failures.Count) lỗi" -ForegroundColor Red; exit 1 }
 Write-Host 'PASS: bố cục + mở thư mục + xuất log + thiết lập lại đều đúng' -ForegroundColor Green
-if ($Schedule) { Write-Host 'PASS (-Schedule): A tác vụ+nhãn khớp · B tắt/bật · C đổi giờ qua thiết lập lại · D lỗi báo rõ · E chạy ẩn bỏ qua (đã khôi phục config/state/tác vụ)' -ForegroundColor Green }
+if ($Schedule) { Write-Host 'PASS (-Schedule): A tác vụ+nhãn khớp · B tắt/bật · C đổi giờ qua thiết lập lại · D lỗi báo rõ · E chạy ẩn bỏ qua · F --tray + 1 instance · G tắt máy không bị chặn (đã khôi phục config/state/tác vụ)' -ForegroundColor Green }

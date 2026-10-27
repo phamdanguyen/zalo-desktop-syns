@@ -24,19 +24,22 @@ namespace ZaloSync
             if (args.Contains("--scheduled")) return Cli.RunScheduled();
             bool tray = args.Contains("--tray"); // mục Startup (HKCU\…\Run) mở thẳng xuống khay
             // Chỉ 1 giao diện: app đã tự mở ở khay lúc đăng nhập → bấm lối tắt thì hiện cửa sổ đang chạy, không mở bản thứ 2.
+            // Báo bằng sự kiện có tên, KHÔNG broadcast: form ẩn ở khay (ShowInTaskbar=false) là cửa sổ "được sở hữu"
+            // → không nhận tin HWND_BROADCAST (đã thử: cửa sổ không hiện).
             bool first;
             using (new System.Threading.Mutex(true, @"Local\ZaloSync_GUI", out first))
+            using (var show = new System.Threading.EventWaitHandle(false, System.Threading.EventResetMode.AutoReset, @"Local\ZaloSync_Show"))
             {
                 if (!first)
                 {
-                    if (!tray) { Native.AllowSetForegroundWindow(-1); Native.PostMessage((IntPtr)0xFFFF, Native.WM_SHOW_APP, IntPtr.Zero, IntPtr.Zero); } // HWND_BROADCAST
+                    if (!tray) { Native.AllowSetForegroundWindow(-1); show.Set(); } // cho bản đang chạy được đưa cửa sổ lên trước
                     return 0;
                 }
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
                 try { Cli.EnsureRuntime(); }
                 catch (Exception ex) { MessageBox.Show("Không chuẩn bị được runtime: " + ex.Message, "Lỗi"); return 1; }
-                try { Application.Run(new MainForm(tray)); }
+                try { Application.Run(new MainForm(tray, show)); }
                 catch (Exception ex) { MessageBox.Show(ex.ToString(), "Lỗi khởi động"); return 1; }
                 return 0;
             }
@@ -45,14 +48,8 @@ namespace ZaloSync
 
     static class Native
     {
-        [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
-        static extern int RegisterWindowMessage(string name);
-        [System.Runtime.InteropServices.DllImport("user32.dll")]
-        public static extern bool PostMessage(IntPtr h, int msg, IntPtr w, IntPtr l);
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         public static extern bool AllowSetForegroundWindow(int pid);
-        // bản thứ 2 phát tin này → bản đang chạy (kể cả đang ẩn ở khay) hiện cửa sổ
-        public static readonly int WM_SHOW_APP = RegisterWindowMessage("ZaloSync_ShowWindow");
     }
 
     // ---- Cầu nối Node CLI ----
@@ -217,8 +214,11 @@ namespace ZaloSync
         static readonly Color TEXT = Color.FromArgb(230, 237, 243);
         static readonly Color MUTED = Color.FromArgb(139, 151, 165);
 
-        public MainForm(bool startInTray)
+        public MainForm(bool startInTray, System.Threading.WaitHandle showSignal)
         {
+            // bản thứ 2 (bấm lối tắt khi app đang ở khay) bật sự kiện → hiện cửa sổ đang chạy
+            Load += (s, e) => System.Threading.ThreadPool.RegisterWaitForSingleObject(showSignal,
+                (o, timedOut) => BeginInvoke((Action)ShowFromTray), null, -1, false);
             if (startInTray)
             {
                 // trong suốt + không nút taskbar tới khi ẩn xong (không chớp cửa sổ); Load vẫn chạy → Boot (migrate, đối chiếu lịch)
@@ -279,12 +279,6 @@ namespace ZaloSync
         void ShowFromTray()
         {
             Show(); ShowInTaskbar = true; WindowState = FormWindowState.Normal; Activate();
-        }
-
-        protected override void WndProc(ref Message m)
-        {
-            if (m.Msg == Native.WM_SHOW_APP && Native.WM_SHOW_APP != 0) { ShowFromTray(); return; }
-            base.WndProc(ref m);
         }
 
         // ---- helpers tạo control (bố cục co giãn theo cửa sổ — không dùng toạ độ cố định) ----
