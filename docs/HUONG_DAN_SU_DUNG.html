@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hướng dẫn sử dụng Zalo Sync</title>
+<style>
+  :root {
+    --primary: #d96514;
+    --primary-hover: #b8500c;
+    --dark-bg: #1e242b;
+    --light-bg: #f8fafc;
+    --text-main: #1e293b;
+    --text-muted: #64748b;
+    --border-color: #e2e8f0;
+    --card-bg: #ffffff;
+    --success: #16a34a;
+    --info-bg: #eff6ff;
+    --info-border: #93c5fd;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
+    color: var(--text-main);
+    background-color: var(--light-bg);
+    margin: 0;
+    padding: 0;
+  }
+  .container {
+    max-width: 920px;
+    margin: 30px auto;
+    background: var(--card-bg);
+    padding: 40px;
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.06);
+    border: 1px solid var(--border-color);
+  }
+  .header-badge {
+    display: inline-block;
+    background: #ffedd5;
+    color: var(--primary);
+    font-weight: 700;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 4px 12px;
+    border-radius: 20px;
+    margin-bottom: 12px;
+  }
+  h1 {
+    font-size: 26px;
+    color: #0f172a;
+    margin: 0 0 8px 0;
+    line-height: 1.3;
+  }
+  .subtitle {
+    font-size: 15px;
+    color: var(--text-muted);
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 2px solid #f1f5f9;
+  }
+  h2 {
+    font-size: 19px;
+    color: #0f172a;
+    margin-top: 32px;
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-left: 4px solid var(--primary);
+    padding-left: 10px;
+  }
+  h3 {
+    font-size: 16px;
+    color: #1e293b;
+    margin-top: 20px;
+    margin-bottom: 8px;
+  }
+  p { margin: 0 0 12px; }
+  ul, ol { margin: 0 0 14px; padding-left: 22px; }
+  li { margin-bottom: 6px; }
+  .callout {
+    background: var(--info-bg);
+    border-left: 4px solid var(--info-border);
+    padding: 14px 18px;
+    border-radius: 6px;
+    margin: 16px 0;
+    font-size: 14.5px;
+  }
+  .callout-success {
+    background: #f0fdf4;
+    border-left: 4px solid var(--success);
+  }
+  .callout-title {
+    font-weight: 700;
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .step-card {
+    background: #f8fafc;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 20px;
+    margin: 20px 0;
+  }
+  .step-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 700;
+    font-size: 16px;
+    color: #0f172a;
+    margin-bottom: 10px;
+  }
+  .step-num {
+    background: var(--primary);
+    color: #fff;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+  }
+  .img-box {
+    margin: 14px 0 6px 0;
+    text-align: center;
+    background: #0d1117;
+    padding: 10px;
+    border-radius: 8px;
+  }
+  .img-box img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 6px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+  }
+  .img-caption {
+    font-size: 12.5px;
+    color: #94a3b8;
+    margin-top: 6px;
+    text-align: center;
+    font-style: italic;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: 14px;
+  }
+  th, td {
+    border: 1px solid var(--border-color);
+    padding: 10px 14px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th {
+    background: #f1f5f9;
+    color: #334155;
+    font-weight: 600;
+  }
+  tr:nth-child(even) td {
+    background: #fafafa;
+  }
+  .btn-badge {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 12.5px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .btn-orange {
+    background: #ffedd5;
+    color: #c2410c;
+    border: 1px solid #fed7aa;
+  }
+  .btn-gray {
+    background: #f1f5f9;
+    color: #334155;
+    border: 1px solid #cbd5e1;
+  }
+  code {
+    background: #f1f5f9;
+    color: #0f172a;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 13.5px;
+    font-family: Consolas, monospace;
+  }
+  .footer {
+    text-align: center;
+    margin-top: 36px;
+    padding-top: 18px;
+    border-top: 1px solid var(--border-color);
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div class="header-badge">TÀI LIỆU NỘI BỘ</div>
+  <h1>HƯỚNG DẪN SỬ DỤNG PHẦN MỀM ZALO SYNC</h1>
+  <div class="subtitle">Ứng dụng thu thập &amp; lưu trữ dữ liệu nhóm Zalo công trường phục vụ quản trị và hỗ trợ AI</div>
+
+  <h2>1. Mục đích &amp; Lợi ích sử dụng</h2>
+  <p><strong>Zalo Sync</strong> là ứng dụng chuyên dụng dành cho cán bộ nhân viên, ban chỉ đạo và ban điều hành các công trường.</p>
+  <ul>
+    <li><strong>Lưu trữ dữ liệu:</strong> Tự động gom tin nhắn, hình ảnh hiện trường, bản vẽ thi công, file báo cáo từ các nhóm Zalo về máy tính cá nhân.</li>
+    <li><strong>Sẵn sàng cho AI:</strong> Dữ liệu được tổ chức khoa học, chuẩn hóa phục vụ phân tích tự động và tra cứu nhanh qua trợ lý AI.</li>
+    <li><strong>Bảo mật &amp; An toàn tuyệt đối:</strong> Ứng dụng chỉ đọc dữ liệu Zalo trên chính máy tính của bạn, không gửi thông tin tài khoản, mật khẩu hay dữ liệu ra bên ngoài.</li>
+    <li><strong>Đóng gói 1 file:</strong> Không cần cài đặt Node.js hay quyền Quản trị viên (Admin), chỉ tải về là chạy được ngay.</li>
+  </ul>
+
+  <h2>2. Chuẩn bị trước khi chạy</h2>
+  <ol>
+    <li><strong>Đăng nhập Zalo PC:</strong> Máy tính đã cài đặt và đăng nhập ứng dụng Zalo PC ít nhất một lần.</li>
+    <li><strong>Mẹo tải tin nhắn cũ:</strong> Zalo PC thường chỉ lưu tin nhắn gần đây. Nếu bạn muốn sao lưu dữ liệu lịch sử từ các tháng trước, hãy mở Zalo PC, vào các nhóm dự án cần lấy và <strong>cuộn chuột lên phía trên</strong> vài trang để Zalo tải tin nhắn và tài liệu về máy trước khi bắt đầu đồng bộ.</li>
+  </ol>
+
+  <h2>3. Khởi động phần mềm</h2>
+  <ul>
+    <li><strong>Cách 1:</strong> Bấm đúp chuột vào file <code>ZaloSync.exe</code> để mở trực tiếp. <em>(Lần đầu mở ứng dụng sẽ mất khoảng 3–5 giây để tự động chuẩn bị dữ liệu).</em></li>
+    <li><strong>Cách 2:</strong> Bấm đúp file <code>CaiDat (tuy chon).bat</code> để tạo lối tắt (Shortcut) ra màn hình Desktop cho những lần sau.</li>
+    <li><strong>Nâng cấp từ bản cũ:</strong> Nếu máy đã dùng bản cũ, hãy thoát hẳn bản cũ (chuột phải biểu tượng ở khay hệ thống → <strong>Thoát hẳn</strong>) rồi mở bản mới. Cấu hình, các nhóm đã chọn, tiến độ đồng bộ và lịch chạy tự động được tự chuyển sang; thư mục mặc định trong Documents được đổi theo tên mới (<code>Documents\ZaloSync</code>), thư mục bạn tự chọn giữ nguyên. Có thể xoá file exe và lối tắt của bản cũ.</li>
+  </ul>
+
+  <h2>4. Thiết lập ban đầu (Chỉ làm 1 lần duy nhất qua 4 bước)</h2>
+
+  <div class="step-card">
+    <div class="step-header">
+      <div class="step-num">1</div>
+      <span>Bước 1 — Phát hiện tài khoản Zalo trên máy</span>
+    </div>
+    <p>Phần mềm tự động quét và nhận diện tài khoản Zalo đang hoạt động trên máy tính của bạn. Bạn nhấp chuột chọn dòng tài khoản của mình, sau đó bấm nút cam <strong>Tiếp tục →</strong> ở góc dưới bên phải.</p>
+    <div class="img-box">
+      <img src="step1-860x640.png" alt="Bước 1: Phát hiện Zalo trên máy">
+      <div class="img-caption">Hình 1: Danh sách tài khoản Zalo tự động phát hiện trên máy</div>
+    </div>
+  </div>
+
+  <div class="step-card">
+    <div class="step-header">
+      <div class="step-num">2</div>
+      <span>Bước 2 — Khóa giải mã (Hoàn toàn tự động)</span>
+    </div>
+    <p>Cơ sở dữ liệu Zalo được mã hóa an toàn trên máy tính. Ứng dụng tích hợp thuật toán tự động giải mã offline — bạn <strong>không cần tìm hay nhập bất kỳ mật khẩu nào</strong>.</p>
+    <div class="callout callout-success">
+      <div class="callout-title">✓ Xác nhận thành công</div>
+      <div>Khi màn hình hiện dòng chữ màu xanh <code>✓ Đã tự dò được khóa và xác minh thành công.</code>, bạn chỉ cần bấm <strong>Tiếp tục →</strong>.</div>
+    </div>
+    <div class="img-box">
+      <img src="step2-860x640.png" alt="Bước 2: Tự dò khóa giải mã">
+      <div class="img-caption">Hình 2: Khóa giải mã được dò và xác minh hoàn toàn tự động</div>
+    </div>
+  </div>
+
+  <div class="step-card">
+    <div class="step-header">
+      <div class="step-num">3</div>
+      <span>Bước 3 — Chọn nhóm dự án cần đồng bộ</span>
+    </div>
+    <p>Màn hình hiển thị danh sách tất cả các nhóm công việc mà bạn tham gia (nhóm công trường, ban điều hành, phòng ban). Bạn có thể bấm <strong>"Chọn tất cả"</strong> hoặc bỏ chọn để chỉ tích các nhóm công trường mình phụ trách theo dõi, sau đó bấm <strong>Tiếp tục →</strong>.</p>
+    <div class="img-box">
+      <img src="step3-860x640.png" alt="Bước 3: Chọn nhóm dự án cần đồng bộ">
+      <div class="img-caption">Hình 3: Chọn danh sách nhóm công việc / công trường dự án</div>
+    </div>
+  </div>
+
+  <div class="step-card">
+    <div class="step-header">
+      <div class="step-num">4</div>
+      <span>Bước 4 — Nơi lưu &amp; Giờ chạy tự động</span>
+    </div>
+    <ul>
+      <li><strong>Tên dự án:</strong> Giữ mặc định là <code>Zalo Sync — dữ liệu nhóm công trường</code>.</li>
+      <li><strong>Thư mục lưu dữ liệu:</strong> Mặc định lưu tại <code>Documents\ZaloSync\data</code> (bấm nút <strong>"Chọn..."</strong> nếu muốn đổi sang ổ D: hoặc E:).</li>
+      <li><strong>Giờ chạy tự động hằng ngày:</strong> Khuyến nghị để <strong>04:15 AM</strong> (sáng sớm). Hệ thống sẽ tự động quét gom toàn bộ dữ liệu ngày hôm trước vào ban đêm khi bạn không sử dụng máy.</li>
+    </ul>
+    <p>Sau đó bấm nút màu cam <strong>✔ Hoàn tất &amp; lưu</strong>.</p>
+    <div class="img-box">
+      <img src="step4-860x640.png" alt="Bước 4: Nơi lưu &amp; lịch chạy">
+      <div class="img-caption">Hình 4: Thiết lập thư mục lưu trữ và giờ hẹn chạy tự động</div>
+    </div>
+  </div>
+
+  <h2>5. Hướng dẫn sử dụng hằng ngày (Bảng điều khiển)</h2>
+  <p>Sau khi hoàn tất cài đặt, bạn sẽ chuyển tới <strong>Bảng điều khiển</strong> trung tâm. Tại đây mọi thao tác đều rất trực quan:</p>
+
+  <div class="img-box">
+    <img src="dashboard-860x640.png" alt="Bảng điều khiển Zalo Sync">
+    <div class="img-caption">Hình 5: Giao diện Bảng điều khiển Zalo Sync</div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 25%;">Nút chức năng</th>
+        <th>Ý nghĩa &amp; Cách sử dụng</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="btn-badge btn-orange">▶ Chạy ngay</span></td>
+        <td>Bấm để tiến hành tải tin nhắn, tài liệu, hình ảnh ngay lập tức. Khung đen phía dưới sẽ hiển thị tiến trình đang quét và tải.</td>
+      </tr>
+      <tr>
+        <td><span class="btn-badge btn-gray">⏰ Bật tự động</span></td>
+        <td><strong>Rất khuyến nghị:</strong> Bấm 1 lần duy nhất để bật chế độ tự động chạy hằng ngày theo giờ đã đặt ở Bước 4. Trạng thái sẽ chuyển sang <code>BẬT</code>.</td>
+      </tr>
+      <tr>
+        <td><span class="btn-badge btn-gray">📁 Thư mục dữ liệu</span></td>
+        <td>Mở nhanh thư mục lưu trữ trên máy tính chứa toàn bộ tin nhắn và các tệp đính kèm đã tải về.</td>
+      </tr>
+      <tr>
+        <td><span class="btn-badge btn-gray">📋 Xuất log</span></td>
+        <td>Khi gặp trục trặc, bấm nút này để tạo nhanh 1 file nhật ký lỗi (đã che thông tin bí mật) và mở sẵn thư mục báo cáo để bạn gửi cho cán bộ kỹ thuật / AI hỗ trợ.</td>
+      </tr>
+      <tr>
+        <td><span class="btn-badge btn-gray">Chạy thử</span></td>
+        <td>Chạy mô phỏng kiểm tra kết nối quét dữ liệu nhưng không tải file nặng về ổ cứng.</td>
+      </tr>
+      <tr>
+        <td><span class="btn-badge btn-gray">⚙ Thiết lập lại</span></td>
+        <td>Quay lại 4 bước cài đặt ban đầu để đổi nhóm, đổi giờ hoặc chọn lại thư mục lưu.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>6. Cơ chế chạy ngầm (Khay hệ thống)</h2>
+  <ul>
+    <li>Khi bấm nút đóng cửa sổ <strong>[X]</strong> hoặc thu nhỏ, ứng dụng sẽ <strong>không tắt</strong> mà tự thu về <strong>Khay hệ thống</strong> (góc dưới cùng bên phải màn hình, cạnh đồng hồ Windows).</li>
+    <li>Biểu tượng ô vuông bo góc màu cam có chữ <strong>Z</strong> màu trắng ở khay cho biết ứng dụng vẫn đang chạy ngầm sẵn sàng. (Ở cỡ lớn — Desktop, thanh tác vụ — chữ <strong>Z</strong> được bao quanh bởi hai mũi tên xoay vòng, biểu tượng đồng bộ.)</li>
+    <li><strong>Thao tác nhanh:</strong>
+      <ul>
+        <li><strong>Bấm đúp biểu tượng:</strong> Mở lại cửa sổ giao diện chính.</li>
+        <li><strong>Chuột phải vào biểu tượng:</strong> Hiện menu chọn <em>"Mở giao diện"</em>, <em>"Chạy ngay"</em> hoặc <em>"Thoát hẳn"</em>.</li>
+      </ul>
+    </li>
+  </ul>
+
+  <h2>7. Giải đáp thắc mắc &amp; Lưu ý an toàn</h2>
+  <div class="callout">
+    <div class="callout-title">🔒 Bảo mật dữ liệu</div>
+    Ứng dụng chỉ đọc dữ liệu Zalo trên máy của chính bạn, lưu về ổ cứng của bạn, tuyệt đối không gửi tài khoản hay mật khẩu đi bất kỳ đâu.
+  </div>
+  <div class="callout">
+    <div class="callout-title">💡 Máy tính tắt vào giờ hẹn?</div>
+    Tác vụ tự động đã tích hợp cơ chế tự bù: khi bạn bật máy tính lên làm việc, hệ thống sẽ tự động quét bù dữ liệu mà bạn không cần phải thao tác thủ công.
+  </div>
+  <div class="callout">
+    <div class="callout-title">🛠 Hỗ trợ kỹ thuật</div>
+    Mọi thắc mắc hoặc trường hợp đồng bộ báo lỗi, hãy bấm nút <strong>"Xuất log"</strong> trên bảng điều khiển và gửi file nhật ký vừa xuất cho quản trị viên công nghệ hoặc đưa vào khung chat AI để được hỗ trợ tức thì.
+  </div>
+
+  <div class="footer">
+    Tài liệu hướng dẫn nội bộ | Bản cập nhật 2026
+  </div>
+</div>
+
+</body>
+</html>

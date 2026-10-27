@@ -1,0 +1,21 @@
+# --- Build artifacts & binaries (self-contained exe is 90+ MB; regenerate via winform/build*.ps1) ---
+dist/
+winform/build/
+*.exe
+*.zip
+*.dll
+
+# --- Dev/forensic probes: NOT shipped, and hardcode a real recovered key. Keep out of the repo. ---
+dev/
+
+# --- Screenshots may capture the detected key / real group names / Windows username ---
+docs/*.png
+
+# --- Backups ---
+*.bak
+*.bak-*
+
+# --- Node / OS cruft ---
+node_modules/
+Thumbs.db
+.DS_Store
