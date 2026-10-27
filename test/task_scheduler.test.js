@@ -28,45 +28,27 @@ test('normTime: giờ hợp lệ giữ nguyên, sai định dạng/ngoài miền
     assert.equal(scheduler.normTime(bad), '04:15', String(bad));
 });
 
-// ---------- lastSlot / isRunDue ----------
-const D = (d, hh, mm, ss = 0) => new Date(2026, 9, d, hh, mm, ss); // tháng 10, giờ địa phương
+// ---------- shouldRun ----------
+const NOW = new Date(2026, 9, 27, 9, 0, 0);
+const ago = (min) => new Date(NOW.getTime() - min * 60000).toISOString();
 
-test('lastSlot: sau mốc → mốc hôm nay; trước mốc → mốc hôm qua', () => {
-  assert.equal(+scheduler.lastSlot(D(27, 10, 0), '04:15'), +D(27, 4, 15));
-  assert.equal(+scheduler.lastSlot(D(27, 3, 0), '04:15'), +D(26, 4, 15));
-});
-
-test('lastSlot: trong 2 phút đệm trước mốc vẫn tính là mốc hôm nay, 3 phút trước thì không', () => {
-  assert.equal(+scheduler.lastSlot(D(27, 4, 13, 30), '04:15'), +D(27, 4, 15));
-  assert.equal(+scheduler.lastSlot(D(27, 4, 12), '04:15'), +D(26, 4, 15));
-});
-
-test('lastSlot: giờ sai → dùng mặc định', () => {
-  assert.equal(+scheduler.lastSlot(D(27, 10, 0), 'rac'), +D(27, 4, 15));
-});
-
-test('isRunDue: bỏ lỡ hôm nay (thành công gần nhất hôm qua) → đến hạn', () => {
-  assert.equal(scheduler.isRunDue({ now: D(27, 9, 0), time: '04:15', lastSuccessAt: D(26, 4, 16).toISOString() }), true);
-});
-
-test('isRunDue: đã thành công sau mốc hôm nay → không đến hạn', () => {
-  assert.equal(scheduler.isRunDue({ now: D(27, 9, 0), time: '04:15', lastSuccessAt: D(27, 4, 16).toISOString() }), false);
-});
-
-test('isRunDue: chưa tới mốc hôm nay mà đã thành công sau mốc hôm qua → không đến hạn', () => {
-  assert.equal(scheduler.isRunDue({ now: D(27, 3, 0), time: '04:15', lastSuccessAt: D(26, 5, 0).toISOString() }), false);
-});
-
-test('isRunDue: máy tắt nhiều ngày → đến hạn; chạy bù xong ngay sau đó → không đến hạn nữa (đúng 1 lần)', () => {
-  const last = D(22, 4, 16).toISOString();
-  assert.equal(scheduler.isRunDue({ now: D(27, 9, 0), time: '04:15', lastSuccessAt: last }), true);
-  const afterCatchUp = D(27, 9, 0, 40).toISOString();
-  assert.equal(scheduler.isRunDue({ now: D(27, 9, 5), time: '04:15', lastSuccessAt: afterCatchUp }), false);
-});
-
-test('isRunDue: lastSuccessAt thiếu/rác → đến hạn', () => {
+test('shouldRun: chưa từng thành công / giá trị rác → chạy', () => {
   for (const bad of [undefined, null, '', 'khong-phai-ngay'])
-    assert.equal(scheduler.isRunDue({ now: D(27, 9, 0), time: '04:15', lastSuccessAt: bad }), true, String(bad));
+    assert.equal(scheduler.shouldRun({ now: NOW, lastSuccessAt: bad }), true, String(bad));
+});
+
+test('shouldRun: vừa thành công 10 hoặc 29 phút trước → bỏ qua (các trigger kích sát nhau chỉ 1 lượt)', () => {
+  assert.equal(scheduler.shouldRun({ now: NOW, lastSuccessAt: ago(10) }), false);
+  assert.equal(scheduler.shouldRun({ now: NOW, lastSuccessAt: ago(29) }), false);
+});
+
+test('shouldRun: 31 phút, hôm qua, nhiều ngày trước → chạy (mỗi lần đăng nhập đều đồng bộ)', () => {
+  for (const m of [31, 24 * 60, 5 * 24 * 60])
+    assert.equal(scheduler.shouldRun({ now: NOW, lastSuccessAt: ago(m) }), true, m + ' phút');
+});
+
+test('shouldRun: lastSuccessAt ở tương lai (đồng hồ bị chỉnh lùi) → chạy', () => {
+  assert.equal(scheduler.shouldRun({ now: NOW, lastSuccessAt: ago(-60) }), true);
 });
 
 // ---------- buildInstallScript ----------
@@ -95,7 +77,28 @@ test('buildInstallScript: dấu nháy đơn trong đường dẫn được escap
 const rawTask = (over = {}) => JSON.stringify({
   exists: true, state: 'Ready', nextRun: 'x', lastRun: 'y', lastResult: 0,
   execute: EXE, arguments: '--scheduled', logon: true, dailyStart: '2026-10-27T07:30:00',
+  startup: `"${EXE}" --tray`,
   ...over,
+});
+
+test('startupCommand: exe trong ngoặc kép + --tray', () => {
+  assert.equal(scheduler.TRAY_ARG, '--tray');
+  assert.equal(scheduler.startupCommand('C:\\App Dir\\ZaloSync.exe'), '"C:\\App Dir\\ZaloSync.exe" --tray');
+});
+
+test('isTaskCurrent: thiếu/sai giá trị khởi động cùng Windows → không current; khác hoa/thường → vẫn current', () => {
+  const want = { time: '07:30', exe: EXE };
+  assert.equal(scheduler.isTaskCurrent(scheduler.parseQuery(rawTask({ startup: '' })), want), false);
+  assert.equal(scheduler.isTaskCurrent(scheduler.parseQuery(rawTask({ startup: undefined })), want), false);
+  assert.equal(scheduler.isTaskCurrent(scheduler.parseQuery(rawTask({ startup: `"C:\\cu\\ZaloSync.exe" --tray` })), want), false);
+  assert.equal(scheduler.isTaskCurrent(scheduler.parseQuery(rawTask({ startup: `"${EXE}" --tray`.toUpperCase() })), want), true);
+});
+
+test('buildInstallScript: đặt giá trị HKCU Run tên = tên tác vụ, dữ liệu = "exe" --tray (sau Register)', () => {
+  const s = scheduler.buildInstallScript({ name: "T'1", time: '07:30', exe: 'C:\\App\\ZaloSync.exe', workDir: 'C:\\W' });
+  const set = "Set-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -Name 'T''1' -Value '\"C:\\App\\ZaloSync.exe\" --tray'";
+  assert.ok(s.includes(set), s);
+  assert.ok(s.indexOf('Set-ItemProperty') > s.indexOf('Register-ScheduledTask'));
 });
 
 test('parseQuery: suy time từ dailyStart; không có trigger ngày → null', () => {
@@ -182,6 +185,12 @@ test('refresh: đổi giờ trong wizard (config khác tác vụ) → cài lại
   assert.equal(calls[0].time, '09:10');
 });
 
+test('refresh: tác vụ đã có nhưng thiếu giá trị Run (bản cài trước khi có khởi động cùng Windows) → cài lại', () => {
+  const { r, calls } = refreshWith(scheduler.parseQuery(rawTask({ startup: '' })), '07:30');
+  assert.equal(r.refreshed, true);
+  assert.deepEqual(calls, [{ time: '07:30', opt: { exe: EXE } }]);
+});
+
 test('refresh: không có config → dùng giờ mặc định 04:15', () => {
   const { calls } = refreshWith(current('07:30'), null);
   assert.equal(calls[0].time, '04:15');
@@ -205,6 +214,15 @@ test('refresh: thiếu ZALOSYNC_EXE khi tác vụ đang bật → ném lỗi, kh
 function ps(script) {
   return execFileSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script],
     { encoding: 'utf8', windowsHide: true }).trim();
+}
+const RUN_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run';
+// đọc độc lập bằng reg.exe; không có → ''
+function runValue(name) {
+  try {
+    const out = execFileSync('reg', ['query', RUN_KEY, '/v', name], { encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+    const m = /REG_SZ\s+(.*)/.exec(out);
+    return m ? m[1].trim() : '';
+  } catch { return ''; }
 }
 function independentQuery(name) {
   return JSON.parse(ps(
@@ -248,6 +266,8 @@ test('TÍCH HỢP: install/uninstall trên Task Scheduler thật', { skip: proce
       assert.equal(q.daily.length, 1);
       assert.match(q.daily[0], /T07:30:00/);
 
+      assert.equal(runValue(name), `"${EXE}" --tray`);
+      assert.equal(info.startup, `"${EXE}" --tray`);
       assert.ok(!fs.existsSync(path.join(root, 'run_sync.bat')), 'run_sync.bat cũ phải bị xoá');
       assert.equal(configStore.load()._app.scheduleTime, '07:30');
 
@@ -258,12 +278,15 @@ test('TÍCH HỢP: install/uninstall trên Task Scheduler thật', { skip: proce
       assert.match(q2.daily[0], /T08:45:00/);
       assert.equal(q2.logon.length, 1);
       assert.equal(configStore.load()._app.scheduleTime, '08:45');
+      assert.equal(runValue(name), `"${EXE}" --tray`);
 
       assert.deepEqual(scheduler.uninstall(name), { ok: true, exists: false });
       assert.equal(scheduler.query(name).exists, false);
+      assert.equal(runValue(name), '', 'giá trị Run phải bị gỡ');
       assert.deepEqual(scheduler.uninstall(name), { ok: true, exists: false }); // idempotent
     } finally {
       try { ps(`Unregister-ScheduledTask -TaskName '${name}' -Confirm:$false -ErrorAction SilentlyContinue`); } catch { /* đã dọn */ }
+      try { ps(`Remove-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -Name '${name}' -ErrorAction SilentlyContinue`); } catch { /* đã dọn */ }
     }
   });
 });

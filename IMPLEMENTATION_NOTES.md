@@ -364,3 +364,26 @@ Nhánh `fix/lich-tu-dong-chay-bu` (commit `342c22d`, `d2e1953` + ghi chú này).
 - 404 khi tải tệp đính kèm (lượt thật hôm nay vẫn còn) — vấn đề engine/nguồn tải, không phải lịch.
 - Máy tắt nhiều ngày → 1 lượt bù lấy đủ dữ liệu nhưng chỉ 1 `DAILY_REPORT_<ngày chạy>.md` (không sinh báo cáo cho từng ngày lỡ) — hành vi engine.
 - Tác vụ bị người dùng Disable trong Task Scheduler vẫn hiện "BẬT" (chỉ kiểm tồn tại). Bộ cài `.bat` không tắt `ZaloSync.exe` đang chạy (lượt tự động đang chạy → copy đè thất bại) — có từ trước.
+
+## 2026-10-27 (chiều) — Khởi động cùng Windows + đồng bộ MỖI lần đăng nhập (yêu cầu: "auto start-up"; "khi chọn bật đồng bộ sẽ đưa vào startup và chạy dữ liệu còn thiếu hàng ngày")
+Nhánh `feat/khoi-dong-cung-windows` (từ `develop`). Master chọn: app tự mở xuống khay + đồng bộ mỗi lần đăng nhập.
+- **Đổi quy tắc chạy (thay quyết định "chỉ bù khi lỡ mốc" ở mục trên):** mọi trigger (hằng ngày, MỖI lần đăng nhập, StartWhenAvailable)
+  đều đồng bộ `--all`; chỉ bỏ qua khi lượt thành công gần nhất BẮT ĐẦU < 30' (`shouldRun`, thay `isRunDue`/`lastSlot`) — chặn trigger
+  đăng nhập (trễ 10') + StartWhenAvailable kích sát nhau. Mỗi lượt quét toàn bộ + tải lại tệp còn thiếu ⇒ "chạy dữ liệu còn thiếu".
+  Đánh đổi: engine lỗi liên tục → thử lại ở mọi trigger (chủ ý).
+- **Startup gắn với "⏰ Bật tự động":** `HKCU\…\Run\<tên tác vụ>` = `"<exe>" --tray`, ghi cùng script đăng ký tác vụ; tắt gỡ cả hai (kiểm
+  lại, ném lỗi nếu còn); `refresh` đối chiếu cả giá trị Run → bản cài đã bật lịch trước đó tự được thêm Startup khi mở app. Tên giá trị
+  = tên tác vụ để test dùng tên tạm, không đụng giá trị thật.
+- **GUI:** `--tray` mở ẩn (Opacity 0 tới Shown rồi ẩn; không bóng thông báo mỗi lần đăng nhập; Boot vẫn chạy). **Chỉ 1 bản** (mutex
+  `Local\ZaloSync_GUI`): bản thứ 2 bật sự kiện có tên `Local\ZaloSync_Show` → bản đang chạy hiện cửa sổ. Lần đầu dùng HWND_BROADCAST:
+  test F ĐỎ — form ẩn (ShowInTaskbar=false) là cửa sổ "được sở hữu", không nhận broadcast → đổi sang sự kiện có tên → XANH.
+- **Sửa lỗi có từ trước, lộ ra vì app nay chạy thường trực:** `FormClosing` Cancel mọi lý do → chặn Windows tắt máy/đăng xuất ("app đang
+  chặn tắt máy" mỗi lần khởi động lại). Nay chỉ ẩn xuống khay khi `CloseReason.UserClosing`. Test G: WM_QUERYENDSESSION trả 1; bấm X vẫn ẩn.
+- **Kiểm chứng:** app **69/69**, engine **78/78** (0 skip). `test_ui.ps1 -Schedule` PASS A–G (A/B kiểm thêm giá trị Run; F `--tray` không có
+  cửa sổ hiện, lần mở thứ 2 hiện đúng cửa sổ và tự thoát, `--tray` lần 2 tự thoát, còn đúng 1 tiến trình; G như trên) + phần mặc định PASS.
+  Cài `Programs\ZaloSync\ZaloSync.exe`, khởi động `--tray` như lúc đăng nhập → 1,5 s sau tác vụ + Run đều trỏ bản cài; StartupApproved
+  không vô hiệu hoá. Config của Master (giờ 16:15 do Master đặt lúc 16:04) giữ nguyên.
+- **Chưa kiểm chứng được (cần Master):** khởi động lại máy thật → app hiện ở khay ngay sau đăng nhập; ~10' sau log có `[TỰ ĐỘNG] … chạy (…`.
+- **Ghi nhận, không sửa:** nút của bảng điều khiển hiện ra trước khi gắn sự kiện Click (~1 s đầu bấm bị mất — có từ trước); 1 lần test E
+  tác vụ ở trạng thái Running ~11 s dù log "bỏ qua" sau 0,4 s (chưa rõ, LastTaskResult vẫn 0). "Thiết lập lại" lúc 16:04 đổi mã thư mục
+  nhóm từ `g…` sang tên nhóm (hành vi có sẵn của wizard) → `Desktop\New folder` có 2 bộ thư mục; chưa dọn, chờ Master quyết.

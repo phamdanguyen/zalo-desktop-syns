@@ -139,33 +139,27 @@ test('khóa hỏng (không phải JSON) → coi là bỏ lại, chạy tiếp', 
   });
 });
 
-test('runScheduled chưa đến hạn: engine không chạy, {code:0, skipped:true}, log ghi [TỰ ĐỘNG] bỏ qua', async () => {
+test('runScheduled vừa thành công 5 phút trước: engine không chạy, {code:0, skipped:true}, log ghi [TỰ ĐỘNG] bỏ qua', async () => {
   await withRig(async ({ runs, log }) => {
-    const now = new Date(2026, 9, 27, 9, 0);
-    configStore.writeState({ lastSuccessAt: new Date(2026, 9, 27, 4, 20).toISOString() });
+    const now = new Date();
+    configStore.writeState({ lastSuccessAt: new Date(now.getTime() - 5 * 60000).toISOString() });
     const res = await runner.runScheduled({ now });
     assert.deepEqual(res, { code: 0, skipped: true });
     assert.equal(runs().length, 0);
-    assert.match(log(), /\[TỰ ĐỘNG\].*bỏ qua/);
+    assert.match(log(), /\[TỰ ĐỘNG\].*bỏ qua — vừa đồng bộ thành công.*30 phút/);
   });
 });
 
-test('runScheduled đến hạn: chạy engine với --all; gọi lại ngay → bỏ qua (bù đúng 1 lần)', async () => {
+test('runScheduled thành công cách đây 2 giờ: chạy engine với --all; gọi lại ngay → bỏ qua (chỉ 1 lượt)', async () => {
   await withRig(async ({ runs, log }) => {
     const now = new Date();
-    // mốc lịch = 1 giờ trước → lần thành công gần nhất (hôm kia) đã bỏ lỡ
-    const t = new Date(now.getTime() - 3600 * 1000);
-    const time = `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
-    const cfg = configStore.load(); cfg._app.scheduleTime = time; configStore.save(cfg);
-    configStore.writeState({ lastSuccessAt: new Date(now.getTime() - 48 * 3600 * 1000).toISOString() });
-
-    const lines = [];
-    const r1 = await runner.runScheduled({ now }, (l) => lines.push(l));
+    configStore.writeState({ lastSuccessAt: new Date(now.getTime() - 2 * 3600 * 1000).toISOString() });
+    const r1 = await runner.runScheduled({ now });
     assert.equal(r1.code, 0);
     assert.ok(!r1.skipped);
     assert.equal(runs().length, 1);
     assert.match(runs()[0], /--all/);
-    assert.match(log(), /\[TỰ ĐỘNG\].*đến hạn/);
+    assert.match(log(), /\[TỰ ĐỘNG\].*chạy \(lần thành công gần nhất: .*→ đồng bộ toàn bộ/);
 
     const r2 = await runner.runScheduled({ now: new Date() });
     assert.deepEqual(r2, { code: 0, skipped: true });
@@ -173,15 +167,18 @@ test('runScheduled đến hạn: chạy engine với --all; gọi lại ngay →
   });
 });
 
-test('runScheduled khi engine lỗi: trả mã lỗi và lần sau vẫn đến hạn (thử lại)', async () => {
-  await withRig(async ({ runs }) => {
-    const now = new Date();
-    const t = new Date(now.getTime() - 3600 * 1000);
-    const time = `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
-    const cfg = configStore.load(); cfg._app.scheduleTime = time; configStore.save(cfg);
+test('runScheduled chưa từng đồng bộ: chạy, log ghi "chưa có"', async () => {
+  await withRig(async ({ runs, log }) => {
+    await runner.runScheduled({ now: new Date() });
+    assert.equal(runs().length, 1);
+    assert.match(log(), /lần thành công gần nhất: chưa có/);
+  });
+});
 
+test('runScheduled khi engine lỗi: trả mã lỗi và lần sau chạy lại (thử lại)', async () => {
+  await withRig(async ({ runs }) => {
     process.env.FAKE_ENGINE_EXIT = '2';
-    const r1 = await runner.runScheduled({ now });
+    const r1 = await runner.runScheduled({ now: new Date() });
     assert.equal(r1.code, 2);
     assert.equal(configStore.readState().lastSuccessAt, undefined);
 
@@ -207,7 +204,7 @@ test('runScheduled lỗi TRƯỚC khi chạy engine (mất cấu hình): ném l�
 test('runScheduled khi khóa đang bận: bỏ qua với code 0, engine không chạy', async () => {
   await withRig(async ({ runs, lockFile, log }) => {
     writeLock(lockFile, process.pid, new Date().toISOString());
-    const res = await runner.runScheduled({ now: new Date() }); // chưa có lastSuccessAt → đến hạn
+    const res = await runner.runScheduled({ now: new Date() }); // chưa có lastSuccessAt → lẽ ra chạy, nhưng khóa bận
     assert.deepEqual(res, { code: 0, skipped: true });
     assert.equal(runs().length, 0);
     assert.match(log(), /\[TỰ ĐỘNG\].*bỏ qua/);
