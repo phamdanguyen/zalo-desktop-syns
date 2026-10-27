@@ -102,6 +102,7 @@ node --test scripts/*.test.js                    # all engine tests (`node --tes
 # --- app tests ---
 node --test test/*.test.js                       # app/lib unit tests (kept out of lib/ — build.ps1 embeds lib/*.js)
 powershell -ExecutionPolicy Bypass -File winform/test_ui.ps1   # GUI test on the real exe (layout at 3 sizes + export-log + name/legacy-migration)
+powershell -ExecutionPolicy Bypass -File winform/test_ui.ps1 -Schedule  # + schedule E2E (MUTATES the real task/config, backup+restore in finally)
 
 # --- build the shippable single-file exe (Windows, in-box .NET csc) ---
 # pwsh is NOT installed on the dev box; Windows PowerShell 5.1 works (scripts carry a UTF-8 BOM for that — keep it).
