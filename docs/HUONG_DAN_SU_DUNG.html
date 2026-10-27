@@ -285,7 +285,7 @@
       <li><strong>Thư mục lưu dữ liệu:</strong> Mặc định lưu tại <code>Documents\ZaloSync\data</code> (bấm nút <strong>"Chọn..."</strong> nếu muốn đổi sang ổ D: hoặc E:).</li>
       <li><strong>Giờ chạy tự động hằng ngày:</strong> Khuyến nghị để <strong>04:15 AM</strong> (sáng sớm). Hệ thống sẽ tự động quét gom toàn bộ dữ liệu ngày hôm trước vào ban đêm khi bạn không sử dụng máy.</li>
     </ul>
-    <p>Sau đó bấm nút màu cam <strong>✔ Hoàn tất &amp; lưu</strong>. Lần thiết lập đầu tiên, lịch chạy tự động được <strong>bật luôn</strong> theo giờ vừa chọn. Khi dùng <strong>⚙ Thiết lập lại</strong> để đổi giờ, lịch đang bật sẽ được cập nhật sang giờ mới.</p>
+    <p>Sau đó bấm nút màu cam <strong>✔ Hoàn tất &amp; lưu</strong>. Lần thiết lập đầu tiên, chế độ tự động được <strong>bật luôn</strong> theo giờ vừa chọn: đồng bộ hằng ngày, đồng bộ mỗi lần đăng nhập, và khởi động cùng Windows. Khi dùng <strong>⚙ Thiết lập lại</strong> để đổi giờ, lịch đang bật sẽ được cập nhật sang giờ mới.</p>
     <div class="img-box">
       <img src="step4-860x640.png" alt="Bước 4: Nơi lưu &amp; lịch chạy">
       <div class="img-caption">Hình 4: Thiết lập thư mục lưu trữ và giờ hẹn chạy tự động</div>
@@ -314,7 +314,7 @@
       </tr>
       <tr>
         <td><span class="btn-badge btn-gray">⏰ Bật tự động</span></td>
-        <td>Lịch chạy đã được bật sẵn sau lần thiết lập đầu tiên. Nút này để tắt (<strong>⏸ Tắt tự động</strong>) hoặc bật lại. Khi bật, Windows chạy ngầm hằng ngày đúng giờ đặt ở Bước 4, không hiện cửa sổ nào, và trạng thái báo <code>BẬT</code>. Nếu Windows từ chối đăng ký, ứng dụng hiện thông báo lỗi.</td>
+        <td>Chế độ tự động đã được bật sẵn sau lần thiết lập đầu tiên. Nút này để tắt (<strong>⏸ Tắt tự động</strong>) hoặc bật lại. Khi bật: (1) Windows chạy đồng bộ ngầm hằng ngày đúng giờ đặt ở Bước 4, không hiện cửa sổ nào; (2) <strong>mỗi lần đăng nhập Windows</strong> sẽ đồng bộ thêm một lượt sau khoảng 10 phút, để lấy luôn dữ liệu còn thiếu; (3) ứng dụng <strong>tự khởi động cùng Windows</strong> và nằm sẵn ở khay. Trạng thái báo <code>BẬT</code>. Khi tắt, cả ba đều được gỡ. Nếu Windows từ chối đăng ký, ứng dụng hiện thông báo lỗi.</td>
       </tr>
       <tr>
         <td><span class="btn-badge btn-gray">📁 Thư mục dữ liệu</span></td>
@@ -354,7 +354,7 @@
   </div>
   <div class="callout">
     <div class="callout-title">💡 Máy tính tắt (hoặc đang ngủ) vào giờ hẹn?</div>
-    Ứng dụng tự chạy bù: khoảng <strong>10 phút sau khi bạn đăng nhập Windows</strong> (để Zalo PC kịp mở và nhận tin mới), hoặc ngay khi máy thức dậy. Dù máy tắt nhiều ngày, chỉ cần <strong>một lượt bù</strong> là lấy đủ dữ liệu của tất cả các ngày bị lỡ. Nếu hôm đó đã đồng bộ thành công thì lượt bù tự bỏ qua, không chạy trùng. Lịch chỉ chạy khi bạn đã đăng nhập Windows, và gọi đúng file <code>ZaloSync.exe</code> nên <strong>đừng xoá hay di chuyển file này</strong>. Nếu đã lỡ di chuyển, hãy mở ứng dụng từ chỗ mới một lần để lịch tự cập nhật.
+    Ứng dụng tự chạy bù: khoảng <strong>10 phút sau mỗi lần bạn đăng nhập Windows</strong> (để Zalo PC kịp mở và nhận tin mới), hoặc ngay khi máy thức dậy. Mỗi lượt đều quét lại toàn bộ và tải nốt các tệp còn thiếu, nên dù máy tắt nhiều ngày, chỉ cần <strong>một lượt</strong> là đủ dữ liệu của tất cả các ngày bị lỡ. Nếu vừa đồng bộ thành công trong vòng 30 phút thì lượt mới tự bỏ qua, không chạy trùng. Lịch chỉ chạy khi bạn đã đăng nhập Windows, và gọi đúng file <code>ZaloSync.exe</code> nên <strong>đừng xoá hay di chuyển file này</strong>. Nếu đã lỡ di chuyển, hãy mở ứng dụng từ chỗ mới một lần để lịch tự cập nhật.
   </div>
   <div class="callout">
     <div class="callout-title">🛠 Hỗ trợ kỹ thuật</div>

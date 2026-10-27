@@ -22,14 +22,37 @@ namespace ZaloSync
         {
             // Task Scheduler gọi "ZaloSync.exe --scheduled": đồng bộ ẩn rồi thoát, không mở giao diện.
             if (args.Contains("--scheduled")) return Cli.RunScheduled();
-            Application.EnableVisualStyles();
-            Application.SetCompatibleTextRenderingDefault(false);
-            try { Cli.EnsureRuntime(); }
-            catch (Exception ex) { MessageBox.Show("Không chuẩn bị được runtime: " + ex.Message, "Lỗi"); return 1; }
-            try { Application.Run(new MainForm()); }
-            catch (Exception ex) { MessageBox.Show(ex.ToString(), "Lỗi khởi động"); return 1; }
-            return 0;
+            bool tray = args.Contains("--tray"); // mục Startup (HKCU\…\Run) mở thẳng xuống khay
+            // Chỉ 1 giao diện: app đã tự mở ở khay lúc đăng nhập → bấm lối tắt thì hiện cửa sổ đang chạy, không mở bản thứ 2.
+            bool first;
+            using (new System.Threading.Mutex(true, @"Local\ZaloSync_GUI", out first))
+            {
+                if (!first)
+                {
+                    if (!tray) { Native.AllowSetForegroundWindow(-1); Native.PostMessage((IntPtr)0xFFFF, Native.WM_SHOW_APP, IntPtr.Zero, IntPtr.Zero); } // HWND_BROADCAST
+                    return 0;
+                }
+                Application.EnableVisualStyles();
+                Application.SetCompatibleTextRenderingDefault(false);
+                try { Cli.EnsureRuntime(); }
+                catch (Exception ex) { MessageBox.Show("Không chuẩn bị được runtime: " + ex.Message, "Lỗi"); return 1; }
+                try { Application.Run(new MainForm(tray)); }
+                catch (Exception ex) { MessageBox.Show(ex.ToString(), "Lỗi khởi động"); return 1; }
+                return 0;
+            }
         }
+    }
+
+    static class Native
+    {
+        [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        static extern int RegisterWindowMessage(string name);
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        public static extern bool PostMessage(IntPtr h, int msg, IntPtr w, IntPtr l);
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        public static extern bool AllowSetForegroundWindow(int pid);
+        // bản thứ 2 phát tin này → bản đang chạy (kể cả đang ẩn ở khay) hiện cửa sổ
+        public static readonly int WM_SHOW_APP = RegisterWindowMessage("ZaloSync_ShowWindow");
     }
 
     // ---- Cầu nối Node CLI ----
@@ -194,8 +217,14 @@ namespace ZaloSync
         static readonly Color TEXT = Color.FromArgb(230, 237, 243);
         static readonly Color MUTED = Color.FromArgb(139, 151, 165);
 
-        public MainForm()
+        public MainForm(bool startInTray)
         {
+            if (startInTray)
+            {
+                // trong suốt + không nút taskbar tới khi ẩn xong (không chớp cửa sổ); Load vẫn chạy → Boot (migrate, đối chiếu lịch)
+                Opacity = 0; ShowInTaskbar = false; trayHinted = true; // không bóng thông báo mỗi lần đăng nhập
+                Shown += (s, e) => { HideToTray(); Opacity = 1; };
+            }
             Text = "Zalo Sync — Trình thu thập dữ liệu nhóm";
             Size = new Size(860, 640); // đủ rộng để 6 nút bảng điều khiển nằm trên 1 hàng
             MinimumSize = new Size(720, 560);
@@ -219,7 +248,8 @@ namespace ZaloSync
             try { using (var ico = Assembly.GetExecutingAssembly().GetManifestResourceStream("app.ico")) Icon = new Icon(ico); } catch { }
             SetupTray();
             // Đóng (X) hoặc thu nhỏ → ẩn xuống khay, vẫn chạy nền. Chỉ thoát hẳn qua menu khay.
-            FormClosing += (s, e) => { if (!reallyExit) { e.Cancel = true; HideToTray(); } };
+            // Chỉ chặn khi NGƯỜI DÙNG bấm X — Windows tắt máy/đăng xuất mà Cancel thì bị "app đang chặn tắt máy".
+            FormClosing += (s, e) => { if (!reallyExit && e.CloseReason == CloseReason.UserClosing) { e.Cancel = true; HideToTray(); } };
             Resize += (s, e) => { if (WindowState == FormWindowState.Minimized) HideToTray(); };
 
             Load += async (s, e) => await Boot();
@@ -249,6 +279,12 @@ namespace ZaloSync
         void ShowFromTray()
         {
             Show(); ShowInTaskbar = true; WindowState = FormWindowState.Normal; Activate();
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == Native.WM_SHOW_APP && Native.WM_SHOW_APP != 0) { ShowFromTray(); return; }
+            base.WndProc(ref m);
         }
 
         // ---- helpers tạo control (bố cục co giãn theo cửa sổ — không dùng toạ độ cố định) ----

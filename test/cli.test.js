@@ -34,7 +34,7 @@ test('cli run --scheduled: lần 1 chạy bù (có banner + [TỰ ĐỘNG]), l�
     assert.equal(a.status, 0, a.stderr);
     assert.match(a.stdout, /KHỞI CHẠY/);
     assert.match(a.stdout, /fake engine ok .*--all/);
-    assert.match(r.log(), /\[TỰ ĐỘNG\].*đến hạn/);
+    assert.match(r.log(), /\[TỰ ĐỘNG\].*chạy \(lần thành công/);
 
     const b = r.cli('run', '--scheduled');
     assert.equal(b.status, 0, b.stderr);
