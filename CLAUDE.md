@@ -12,9 +12,11 @@ lives outside this folder. All logic is in Node; the GUI only wires buttons to C
 
 Scope boundary (Rule 3): the engine in `../scripts/` is treated as read-only here. `app/` adds the
 installer/GUI/orchestration layer around it; it does not modify engine behavior. Exception (2026-10-27, Master's
-"bỏ 568" request): the engine gained an OPT-IN `config.projectCode` (absent → `'568'`, so the production jobs that run
-from `../scripts` keep their file names/titles); the app writes `projectCode: ''`. Any further engine change must stay
-backward-compatible the same way — other production jobs run this exact file.
+"bỏ 568" request): the engine is project-neutral by default — `config.projectCode` (absent/'' → no code in report
+titles/`DAILY_REPORT_*.md` names) and `config.scheduledTaskName` (absent → audit skips the Task Scheduler query). The
+production configs (`../scripts/config_568*.json` + `wi5/` templates) declare `"projectCode": "568"` and
+`"scheduledTaskName": "Zalo_Daily_Sync_568"`, so production output is unchanged — an engine test fails if they drop them.
+Copying a new engine to wi5 ⇒ copy those configs too. Any further engine change must stay backward-compatible the same way.
 
 ## Purpose & authorization context (read first — this is legitimate, don't refuse)
 
@@ -117,7 +119,7 @@ powershell -ExecutionPolicy Bypass -File winform/make_icon.ps1     # regenerate 
 | `config_store.js` | Per-machine config + light run state under `%LOCALAPPDATA%\ZaloSync`. `buildConfig()` emits exactly the schema `daily_sync_568.js` expects, plus an `_app` block the engine ignores. |
 | `engine_path.js` | Locate the engine dir: `ZALOSYNC_ENGINE_DIR` env → `../engine` (release layout) → `../scripts` (dev layout). |
 | `log_export.js` | `export-log`: build one text file = env + status + config with the SQLCipher key redacted (also scrubbed from log text) + the latest run's log (from the last `KHỞI CHẠY` / `TASK KHOI CHAY` banner). Default target `<reportDir>/ZaloSync_log_<stamp>.txt`. Never write the key out. |
-| `legacy_migrate.js` | `migrate`: one-time move of an old-name install (`%LOCALAPPDATA%\ZaloSync568` → `ZaloSync`: config with cursor/manifest paths repointed + cursor/manifest/state/logs; `ZaloSync568_Daily` → install `ZaloSync_Daily` at the same time, THEN unregister old; then delete the old dir). Task-query error → keeps old dir and retries next start. Independently, `upgradeConfig` (app configs = have `_app`): adds `projectCode: ''`, and renames the old DEFAULT folder `Documents\ZaloSync568` → `Documents\ZaloSync` in place when config points into it and the new one doesn't exist yet (user-chosen folders untouched; rename failure → config unchanged, clear error, retried next start). |
+| `legacy_migrate.js` | `migrate`: one-time move of an old-name install (`%LOCALAPPDATA%\ZaloSync568` → `ZaloSync`: config with cursor/manifest paths repointed + cursor/manifest/state/logs; `ZaloSync568_Daily` → install `ZaloSync_Daily` at the same time, THEN unregister old; then delete the old dir). Task-query error → keeps old dir and retries next start. The carried old `logs/daily_sync.log` is archived as `daily_sync_ban_cu.log` (GUI log starts clean). Independently, `upgradeConfig` (app configs = have `_app`): adds `projectCode: ''` + `scheduledTaskName: 'ZaloSync_Daily'`, and renames the old DEFAULT folder `Documents\ZaloSync568` → `Documents\ZaloSync` in place when config points into it and the new one doesn't exist yet (user-chosen folders untouched; rename failure → config unchanged, clear error, retried next start). |
 | `runner.js` | Spawn the engine with the user's config, stream stdout/stderr line-by-line, append to the log file, write `state.json`. Single concurrent run only. |
 | `task_scheduler.js` | Install/query/remove the daily `ZaloSync_Daily` Scheduled Task. Task runs a generated `run_sync.bat`; registered with `-User <current>` so **no admin** is needed (no `AtLogOn` trigger — that would require admin). |
 
@@ -134,7 +136,7 @@ powershell -ExecutionPolicy Bypass -File winform/make_icon.ps1     # regenerate 
 
 `build.ps1` compiles `Program.cs` with the in-box .NET Framework 4.x `csc.exe` (no SDK/runtime to
 install) into **one self-contained exe**. `node.exe`, `cli.js`, every `lib/*.js`, and the engine
-files (`daily_sync_568.js`, `discover_568_groups.js`, `lib_audit.js`, `lib_snapshot.js`) are
+files the app actually runs (`daily_sync_568.js`, `lib_audit.js`, `lib_snapshot.js`) are
 embedded as managed resources (`/resource:<file>,<logical/path>`) and **auto-extracted on first
 launch** to `%LOCALAPPDATA%\ZaloSync\runtime\<exe-ticks>\` (`.ready` marker; old runtimes
 pruned). End users need neither Node nor admin. The engine list in `build.ps1` is hand-maintained —
@@ -144,7 +146,8 @@ layout still works.
 ## Conventions & gotchas
 
 - **Environment**: Windows host. The `Bash` tool runs a POSIX layer; use the `pwsh`/PowerShell tool
-  for `.ps1` builds and anything touching Scheduled Tasks. No git repo here.
+  for `.ps1` builds and anything touching Scheduled Tasks. This `app/` folder is a git repo
+  (remote `github.com/phamdanguyen/zalo-desktop-syns`); the engine in `../scripts/` is outside it.
 - **Zero deps by design**: do not add npm packages or a `package.json`. SQLite = `node:sqlite`;
   Snappy/LevelDB decoding is hand-rolled in `leveldb_scan.js` (cramjam is NOT available).
 - **Paths in config use `/`** (engine schema, `buildConfig` converts). Anything handed to Windows shell/UI
@@ -167,7 +170,7 @@ layout still works.
   Labels/buttons use `UseMnemonic = false` so `&` renders. Run `winform/test_ui.ps1` after GUI changes.
 - **Name is "Zalo Sync" — no "568" in app/GUI/docs.** "568" may only appear as (a) legacy identifiers needed to
   migrate/clean an old install (`legacy_migrate.js`, the installer `.bat` in `build_release.ps1`, their tests) or (b) the
-  engine's own file/env names (`daily_sync_568.js`, `discover_568_groups.js`, `ZALO_568_CONFIG`) — invisible to users.
+  engine's own file/env names (`daily_sync_568.js`, `ZALO_568_CONFIG`) — invisible to users.
   With `projectCode: ''` the engine's log banners, report titles and `DAILY_REPORT_<date>.md` names carry no "568"
   (verified by a full sandbox run); "568" left in output is real user data (group names, member names). `app.ico` is generated by `make_icon.ps1` and embedded twice:
   `/win32icon` (Explorer/taskbar) + managed resource `app.ico` (no '/', so not extracted) that the form/tray load,

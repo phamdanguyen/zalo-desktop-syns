@@ -31,7 +31,8 @@ $resArgs += "/resource:$nodeExe,node/node.exe"
 $resArgs += "/resource:$(Join-Path $appDir 'cli.js'),app/cli.js"
 $resArgs += "/resource:$ico,app.ico"   # tên KHÔNG có '/' → không bị giải nén; Program.cs nạp icon nhiều cỡ từ đây
 Get-ChildItem (Join-Path $appDir 'lib\*.js') | ForEach-Object { $resArgs += "/resource:$($_.FullName),app/lib/$($_.Name)" }
-foreach ($f in 'daily_sync_568.js', 'discover_568_groups.js', 'lib_audit.js', 'lib_snapshot.js') {
+# chỉ những tệp engine thực sự require lúc chạy (discover_568_groups.js là công cụ dòng lệnh riêng, app không dùng)
+foreach ($f in 'daily_sync_568.js', 'lib_audit.js', 'lib_snapshot.js') {
   $resArgs += "/resource:$(Join-Path $root "scripts\$f"),engine/$f"
 }
 

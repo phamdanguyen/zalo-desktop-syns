@@ -298,5 +298,36 @@ tên). `node --test test/*.test.js` → 24/24 PASS. Engine không đụng nên b
 - Build phát hành cuối (gồm cả thay đổi `config_store.js` của phiên app-db) → `test_ui.ps1` (thêm: `projectCode` rỗng, config không trỏ
   `Documents/ZaloSync568`) **PASS** trên `dist\ZaloSync.exe`. Nâng cấp THẬT trên máy này: `projectCode:''`, `reportDir` →
   `Documents/ZaloSync/baocao`, `Documents\ZaloSync568` không còn, 19/19 tệp trùng hash bản sao lưu (`..\_backup\…\Documents_ZaloSync568`).
-- Còn lại (dữ liệu lịch sử, không đổi tên): trong `Documents\ZaloSync\baocao` có các tệp cũ `DAILY_REPORT_568_20261027.md`,
-  `ZaloSync568_log_*.txt`; ô log của GUI vẫn hiện lịch sử lượt chạy cũ tới khi có lượt chạy mới (04:15 hằng ngày hoặc "Chạy ngay").
+- ~~Còn lại: tệp lịch sử `DAILY_REPORT_568_*`/`ZaloSync568_log_*`, ô log hiện lượt chạy cũ~~ → đã xử lý ở vòng 3.
+
+### Vòng 3 — bỏ nốt phần còn sót (stop-hook lần 2)
+- **Engine trung tính mặc định:** `projectCode` thiếu → `''` (không còn mặc định '568' trong mã). Thêm `scheduledTaskName`
+  (`querySchedulerStatus(taskName)` — thiếu → không truy vấn, "Chưa cấu hình"); trước đây cứng `"Zalo_Daily_Sync_568"` nên audit
+  của app luôn "Không thể truy vấn". **4 config production** (`../scripts/config_568.json`, `config_568_all.json`, mẫu `wi5/`)
+  khai báo `"projectCode": "568"` + `"scheduledTaskName": "Zalo_Daily_Sync_568"` → đầu ra production KHÔNG đổi (script chèn có
+  kiểm: JSON hợp lệ, mọi khoá cũ giữ nguyên giá trị). Test engine chặn: config production thiếu 2 khoá → đỏ.
+  ⚠ Máy wi5 chạy bản config RIÊNG của nó: khi chép engine mới sang wi5 phải chép kèm config (hoặc thêm 2 khoá) — nếu không,
+  báo cáo wi5 sẽ thành `DAILY_REPORT_<ngày>.md` (không "568") và audit không hỏi lịch.
+- App: `buildConfig` + `upgradeConfig` thêm `scheduledTaskName: 'ZaloSync_Daily'` (hằng `TASK_NAME` chuyển sang `config_store`,
+  `task_scheduler` dùng lại — tránh vòng lặp require). Chuyển bản cũ: log cũ cất thành `logs/daily_sync_ban_cu.log` → ô log sạch.
+  Bỏ `discover_568_groups.js` khỏi danh sách nhúng của `build.ps1` (engine/app không require; tự đọc `config_568.json` nên vô dụng trong app).
+- **Trên máy này** (đều có sao lưu, kiểm hash trước khi xoá):
+  - Cất log cũ `logs/daily_sync.log` → `daily_sync_ban_cu.log` (tương đương bước migrate mới).
+  - **Chạy đồng bộ THẬT** đúng như nút "▶ Chạy ngay" (`cli.js run --all` của runtime app) để sinh lại báo cáo hôm nay theo tên mới:
+    exit 0; banner `[ZALO DAILY SYNC PIPELINE]` … `[HOÀN TẤT ĐỒNG BỘ TOÀN DIỆN]`; `DAILY_REPORT_20261027.md`; audit lịch "Ready ✅ ĐẠT".
+  - Bỏ các đầu ra cũ đã bị thay thế khỏi `Documents\ZaloSync`: `data\` (chỉ 2 tệp tải về, đều có bản trùng hash trong
+    `Desktop\New folder`; phần còn lại được lượt chạy mới sinh lại), `DAILY_REPORT_568_20261027.md`, 3 tệp `ZaloSync568_log_*.txt`
+    — 18/18 tệp trùng hash với `..\_backup\doi_ten_20261027\Documents_ZaloSync568\` trước khi xoá.
+  - Bản cài cũ `Programs\ZaloSync568\ZaloSync568.exe` (bản build 11:43, không trùng bản nào đã sao lưu) → chuyển vào
+    `..\_backup\…\old_artifacts\Programs_ZaloSync568\`; cài `dist\ZaloSync.exe` vào `Programs\ZaloSync\` (không có lối tắt nào trỏ
+    vào bản cũ; không tạo lối tắt mới vì bản cũ cũng không có).
+- Kiểm chứng: engine **78/78** (mốc đỏ 3 + 4), app **29/29** (mốc đỏ 3), `test_ui.ps1` **PASS** trên exe cuối; quét mọi nơi app
+  ghi (`%LOCALAPPDATA%\ZaloSync`, `Documents\ZaloSync`, `Desktop\New folder`, `Programs\ZaloSync`): không tên tệp nào chứa "568";
+  nội dung "568" chỉ còn ở dữ liệu người dùng (tên 2 nhóm, tên thành viên "A Quân 568", 1 msgId chứa dãy số 568) và đường dẫn
+  `engine\daily_sync_568.js` trong `run_sync.bat` nội bộ (tên tệp engine thật, dùng chung production — không đổi).
+- Ngoài phạm vi, không đụng: tác vụ production `Zalo_Daily_Sync_568`, `Zalo_Daily_Sync_568_All` (job riêng của Master, không phải app);
+  tệp `Desktop\ZaloSync568_log_20261027_130322.txt` (bản cũ xuất lúc 13:03, trước phiên này) — **Master chọn giữ nguyên**.
+- **Master xác nhận tên "Zalo Sync"** ("Sysn" trong yêu cầu là gõ nhầm) — hết giả định.
+- Phát hiện (có từ trước, chưa sửa): bảng điều khiển hiện "04:15 (kế tiếp 28/10/2026 11:15)" — giờ kế tiếp lệch +7 h (lỗi múi giờ hiển thị).
+- `app/` đã thành git repo (phiên app-db, commit `ccb6d45`, đã push): thay đổi sau commit đó chưa commit (CLAUDE.md, build.ps1, ghi chú này);
+  engine `../scripts` nằm NGOÀI repo.
